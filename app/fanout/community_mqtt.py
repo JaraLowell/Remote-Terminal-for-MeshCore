@@ -542,6 +542,8 @@ class CommunityMqttPublisher(BaseMqttPublisher):
             return
         now = time.monotonic()
         if (now - self._last_status_publish) >= _STATS_REFRESH_INTERVAL:
+            logger.info(\"%s periodic status republish (%.0f seconds since last publish)\",
+                       self._integration_label(), now - self._last_status_publish)
             await self._publish_status(self._settings, refresh_stats=True)
 
     def _on_error(self) -> tuple[str, str]:

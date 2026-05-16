@@ -66,6 +66,8 @@ class BaseMqttPublisher(ABC):
         self.integration_name: str = ""
         self._last_error: str | None = None
         self._error_notified: bool = False
+        self._consecutive_publish_failures: int = 0
+        self._last_successful_publish: float = 0.0
 
     def set_integration_name(self, name: str) -> None:
         """Attach the configured fanout-module name for operator-facing logs."""
@@ -106,6 +108,8 @@ class BaseMqttPublisher(ABC):
         self.connected = False
         self._last_error = None
         self._error_notified = False
+        self._consecutive_publish_failures = 0
+        self._last_successful_publish = 0.0
 
     async def restart(self, settings: object) -> None:
         """Called when settings change — stop + start."""
@@ -119,6 +123,9 @@ class BaseMqttPublisher(ABC):
         try:
             logger.info("%s publishing to %s", self._integration_label(), topic)
             await self._client.publish(topic, json.dumps(payload), retain=retain)
+            # Track successful publish
+            self._consecutive_publish_failures = 0
+            self._last_successful_publish = time.time()
         except aiomqtt.MqttCodeError as e:
             # Code 4 = "not connected" - this is expected during connection startup race conditions.
             # Silently drop the message as if self.connected was False.
@@ -129,20 +136,27 @@ class BaseMqttPublisher(ABC):
                 )
                 return
             # Other MQTT errors (authentication, protocol, etc.) - log and mark disconnected
+            self._consecutive_publish_failures += 1
             logger.warning(
-                "%s publish failed on %s with MQTT error code %s: %s",
+                "%s publish failed on %s with MQTT error code %s: %s (consecutive failures: %d)",
                 self._integration_label(),
                 topic,
                 e.rc,
                 e,
+                self._consecutive_publish_failures,
             )
             self.connected = False
+            self._last_error = _format_error_detail(e)
+            self._settings_version += 1
+            self._version_event.set()
         except Exception as e:
+            self._consecutive_publish_failures += 1
             logger.warning(
-                "%s publish failed on %s. This is usually transient network noise; "
+                "%s publish failed on %s (consecutive failures: %d). This is usually transient network noise; "
                 "if it self-resolves and reconnects, it is generally not a concern. Persistent errors may indicate a problem with your network connection or MQTT broker. Original error: %s",
                 self._integration_label(),
                 topic,
+                self._consecutive_publish_failures,
                 e,
                 exc_info=True,
             )
@@ -234,6 +248,15 @@ class BaseMqttPublisher(ABC):
                 client_kwargs = self._build_client_kwargs(settings)
                 connect_time = time.monotonic()
 
+                # Log connection attempt with broker details for debugging
+                broker_info = f"{client_kwargs.get('hostname', 'unknown')}:{client_kwargs.get('port', 'unknown')}"
+                logger.info(
+                    "%s attempting connection to %s via %s",
+                    self._integration_label(),
+                    broker_info,
+                    client_kwargs.get("transport", "tcp"),
+                )
+
                 async with aiomqtt.Client(**client_kwargs) as client:
                     self._client = client
                     self._last_error = None
@@ -249,6 +272,8 @@ class BaseMqttPublisher(ABC):
                     delay = 2.0 if transport == "websockets" else 1.0
                     await asyncio.sleep(delay)
                     self.connected = True
+                    self._consecutive_publish_failures = 0
+                    self._last_successful_publish = time.time()
 
                     title, detail = self._on_connected(settings)
                     broadcast_success(title, detail)
@@ -267,6 +292,18 @@ class BaseMqttPublisher(ABC):
                             await self._on_periodic_wake(elapsed)
                             if self._should_break_wait(elapsed):
                                 break
+                            # If we haven't had a successful publish in the last 10 minutes,
+                            # the connection may be silently broken. Force reconnect.
+                            if self._last_successful_publish > 0:
+                                time_since_last_publish = time.time() - self._last_successful_publish
+                                if time_since_last_publish > 600:  # 10 minutes
+                                    logger.warning(
+                                        "%s no successful publishes for %.0f seconds, "
+                                        "connection may be silently broken. Forcing reconnect.",
+                                        self._integration_label(),
+                                        time_since_last_publish,
+                                    )
+                                    break
                             continue
 
                 # async with exited — client is now closed
