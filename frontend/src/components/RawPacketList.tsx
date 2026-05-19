@@ -138,6 +138,13 @@ export function RawPacketList({ packets, channels, onPacketClick }: RawPacketLis
               </div>
             )}
 
+            {/* Decoded message text (when available) */}
+            {packet.decrypted_info?.message && (
+              <div className="text-[0.75rem] text-foreground mt-1.5 p-2 bg-success/10 border border-success/20 rounded">
+                <div className="break-words">{packet.decrypted_info.message}</div>
+              </div>
+            )}
+
             {/* Raw hex data (always visible) */}
             <div className="font-mono text-[0.625rem] break-all text-muted-foreground mt-1.5 p-1.5 bg-background/60 rounded">
               {packet.data.toUpperCase()}
