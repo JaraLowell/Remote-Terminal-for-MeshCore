@@ -2,14 +2,15 @@ import { Fragment, useEffect, useState, useMemo, useRef, useCallback } from 'rea
 import {
   MapContainer,
   TileLayer,
-  CircleMarker,
+  Marker,
   Popup,
   useMap,
   useMapEvents,
   Polyline,
   LayersControl,
 } from 'react-leaflet';
-import type { LatLngBoundsExpression, CircleMarker as LeafletCircleMarker } from 'leaflet';
+import type { LatLngBoundsExpression, CircleMarker as LeafletCircleMarker, Marker as LeafletMarker } from 'leaflet';
+import { divIcon } from 'leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Contact, RadioConfig, RawPacket } from '../types';
@@ -162,7 +163,6 @@ const MAP_RECENCY_COLORS = {
   stale: '#f59e0b',
   old: '#64748b',
 } as const;
-const MAP_MARKER_STROKE = '#0f172a';
 const MAP_REPEATER_RING = '#f8fafc';
 
 // --- Packet visualization constants ---
@@ -174,18 +174,18 @@ const PARTICLE_TAIL_WIDTH = 5;
 const MAX_MAP_PARTICLES = 200;
 
 // --- Helpers ---
-
-function getMarkerColor(lastSeen: number | null | undefined): string {
-  if (lastSeen == null) return MAP_RECENCY_COLORS.old;
+//* Determine marker color based on last seen time, using the same buckets as the info label. */
+function getMarkerImage(lastSeen: number | null | undefined): string {
+  if (lastSeen == null) return 'marker-grey.png';
   const now = Date.now() / 1000;
   const age = now - lastSeen;
   const hour = 3600;
   const day = 86400;
 
-  if (age < hour) return MAP_RECENCY_COLORS.recent;
-  if (age < day) return MAP_RECENCY_COLORS.today;
-  if (age < 3 * day) return MAP_RECENCY_COLORS.stale;
-  return MAP_RECENCY_COLORS.old;
+  if (age < hour) return 'marker-green.png';
+  if (age < day) return 'marker-orange.png';
+  if (age < 3 * day) return 'marker-red.png';
+  return 'marker-grey.png';
 }
 
 /** Resolve a hop token to a single contact with GPS, or null. */
@@ -759,9 +759,9 @@ export function MapView({
       focusedContact.last_seen <= (showPackets ? threeDaysAgoSec : sevenDaysAgo));
 
   // Track marker refs to open popup programmatically
-  const markerRefs = useRef<Record<string, LeafletCircleMarker | null>>({});
+  const markerRefs = useRef<Record<string, LeafletCircleMarker | LeafletMarker | null>>({});
 
-  const setMarkerRef = useCallback((key: string, ref: LeafletCircleMarker | null) => {
+  const setMarkerRef = useCallback((key: string, ref: LeafletCircleMarker | LeafletMarker | null) => {
     if (ref === null) {
       delete markerRefs.current[key];
       return;
@@ -964,27 +964,41 @@ export function MapView({
 
           {mappableContacts.map((contact) => {
             const isRepeater = contact.type === CONTACT_TYPE_REPEATER;
-            const color = getMarkerColor(contact.last_seen);
             const displayName = contact.name || contact.public_key.slice(0, 12);
             const lastHeardLabel =
               contact.last_seen != null
                 ? formatTime(contact.last_seen)
                 : 'Never heard by this server';
-            const radius = isRepeater ? 10 : 7;
+            const markerImage = getMarkerImage(contact.last_seen);
+
+            const customIcon = divIcon({
+              html: isRepeater
+                ? `
+                  <div style="display: flex; flex-direction: column; align-items: center;">
+                    <div style="position: relative; width: 16px; height: 16px;">
+                      <img src="/signal.png" alt="Repeater" style="position: absolute; top: 0; left: 0; width: 16px; height: 16px;" />
+                      <img src="/${markerImage}" alt="${displayName}" style="position: absolute; top: 3px; left: 3px; width: 10px; height: 10px;" />
+                    </div>
+                  </div>
+                `
+                : `
+                  <div style="display: flex; flex-direction: column; align-items: center;">
+                    <img src="/${markerImage}" alt="${displayName}" style="width: 10px; height: 16px; display: block;" />
+                  </div>
+                `,
+              className: 'custom-marker-icon',
+              iconSize: isRepeater ? [16, 26] : [10, 26],
+              iconAnchor: isRepeater ? [8, 26] : [5, 26],
+              popupAnchor: [0, -26],
+            });
 
             return (
               <Fragment key={contact.public_key}>
-                <CircleMarker
+                <Marker
                   key={contact.public_key}
                   ref={(ref) => setMarkerRef(contact.public_key, ref)}
-                  center={[contact.lat!, contact.lon!]}
-                  radius={radius}
-                  pathOptions={{
-                    color: isRepeater ? MAP_REPEATER_RING : MAP_MARKER_STROKE,
-                    fillColor: color,
-                    fillOpacity: 0.9,
-                    weight: isRepeater ? 3 : 2,
-                  }}
+                  position={[contact.lat!, contact.lon!]}
+                  icon={customIcon}
                 >
                   <Popup>
                     <div className="text-sm">
@@ -1016,7 +1030,7 @@ export function MapView({
                       </div>
                     </div>
                   </Popup>
-                </CircleMarker>
+                </Marker>
               </Fragment>
             );
           })}

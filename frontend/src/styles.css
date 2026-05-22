@@ -58,6 +58,11 @@ body {
   z-index: 0 !important;
 }
 
+.custom-marker-icon {
+  background: none !important;
+  border: none !important;
+}
+
 .leaflet-pane {
   z-index: 0 !important;
 }
