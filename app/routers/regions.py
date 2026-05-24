@@ -15,11 +15,12 @@ router = APIRouter(prefix="/settings/regions", tags=["settings", "regions"])
 DEFAULT_REGIONS = [
     # Country codes (ISO 3166-1 alpha-2)
     "us", "ca", "mx",  # North America
-    "nl", "de", "uk", "fr", "es", "it", "be", "ch", "at", "se", "no", "dk", "fi", "pl", "cz",  # Europe
+    "nl", "de", "uk", "fr", "es", "it", "be", "ch", "at", "se", "no", "dk", "fi", "pl", "cz", "bx", # Europe
     "au", "nz",  # Oceania
     "jp", "kr", "cn", "in", "sg",  # Asia
     "br", "ar", "cl",  # South America
     "za",  # Africa
+    "eu", "eu-west", "eu-east", "eu-north", "eu-south", "europe", # European regions
     # Common regional/local codes Holland/Netherlands (for testing/demo purposes)
     "nl-dr", "nl-fl", "nl-fr", "nl-ge", "nl-gr", "nl-li", "nl-nb", "nl-nh", "nl-ov", "nl-ut", "nl-ze", "nl-zh",
     "nl-noord", "nl-zuid", "nl-oost", "nl-west", "nl-midden"
