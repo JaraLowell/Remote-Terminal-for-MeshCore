@@ -159,8 +159,10 @@ async def identify_packet_region(packet_info: PacketInfo) -> str | None:
     Returns the region name if a match is found, None otherwise.
     """
     if packet_info.transport_codes is None or len(packet_info.transport_codes) < 2:
+        logger.debug("Cannot identify region: no transport codes")
         return None
     if packet_info.payload is None or packet_info.payload_type is None:
+        logger.debug("Cannot identify region: no payload or payload_type")
         return None
 
     from app.repository import RegionRepository
@@ -168,8 +170,17 @@ async def identify_packet_region(packet_info: PacketInfo) -> str | None:
     # Get all known regions
     regions = await RegionRepository.get_all()
     
+    observed_code = int.from_bytes(packet_info.transport_codes[:2], "little")
+    logger.debug(
+        "Identifying region: transport_code=0x%04x (%d), payload_type=%s, testing %d regions",
+        observed_code,
+        observed_code,
+        packet_info.payload_type.name,
+        len(regions),
+    )
+    
     # Test packet against each region
-    for region in regions:
+    for idx, region in enumerate(regions):
         region_key_bytes = None
         if region.key:
             # Custom region with explicit key
@@ -180,14 +191,26 @@ async def identify_packet_region(packet_info: PacketInfo) -> str | None:
         else:
             # Invalid state - public flag False but no key stored
             continue
+        
+        # Calculate expected code for first few regions (debug)
+        if idx < 3:
+            expected_code = calculate_meshcore_transport_code(
+                payload_type=int(packet_info.payload_type),
+                payload=packet_info.payload,
+                region_name=None,
+                region_key=region_key_bytes,
+            )
+            logger.debug("  Region '%s': expected=0x%04x", region.name, expected_code)
             
         if packet_matches_meshcore_region(
             packet_info,
             region_name=None,
             region_key=region_key_bytes,
         ):
+            logger.info("✓ Region identified: %s", region.name)
             return region.name
     
+    logger.debug("✗ No region match found")
     return None
 
 
@@ -426,6 +449,15 @@ async def process_raw_packet(
     region_name = None
     if packet_info and transport_codes:
         region_name = await identify_packet_region(packet_info)
+        if region_name:
+            logger.debug("Packet identified as region: %s", region_name)
+        else:
+            logger.debug(
+                "No region match for transport_codes=%s, payload_type=%s, has_payload=%s",
+                transport_codes.hex() if transport_codes else None,
+                packet_info.payload_type.name if packet_info.payload_type else None,
+                packet_info.payload is not None,
+            )
 
     packet_id, is_new_packet = await RawPacketRepository.create(
         raw_bytes, ts, transport_codes=transport_codes, region_name=region_name
