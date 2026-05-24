@@ -5,6 +5,27 @@
 
 import type { Region } from '../types';
 
+// Track if we've shown the crypto unavailable warning
+let hasWarnedCryptoUnavailable = false;
+
+/**
+ * Check if Web Crypto API is available (requires HTTPS or localhost).
+ */
+function isCryptoAvailable(): boolean {
+  const available = typeof crypto !== 'undefined' && crypto.subtle !== undefined;
+  
+  if (!available && !hasWarnedCryptoUnavailable) {
+    hasWarnedCryptoUnavailable = true;
+    console.warn(
+      '[Region Identifier] Web Crypto API unavailable. ' +
+      'Client-side region identification requires HTTPS or localhost access. ' +
+      'Falling back to backend-identified regions and hex codes.'
+    );
+  }
+  
+  return available;
+}
+
 /**
  * Calculate MeshCore transport code for a given region and packet.
  * Matches Python backend: HMAC-SHA256(region_key, payload_type_byte + payload)[:2]
@@ -110,6 +131,11 @@ export async function identifyPacketRegion(
   dataHex: string,
   regions: Region[]
 ): Promise<string | null> {
+  // Check if Web Crypto API is available (requires HTTPS or localhost)
+  if (!isCryptoAvailable()) {
+    return null;
+  }
+
   // Extract transport codes from packet
   const codes = extractTransportCodes(dataHex);
   if (!codes) return null; // Not a transport packet

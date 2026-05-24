@@ -42,13 +42,10 @@ function formatSignalInfo(packet: RawPacket, identifiedRegion?: string | null): 
   }
   // Prefer client-side identified region, then stored region_name, then hex codes
   if (identifiedRegion) {
-    console.log(`[formatSignalInfo] Using client-identified region: ${identifiedRegion}`);
     parts.push(`Region: ${identifiedRegion}`);
   } else if (packet.region_name) {
-    console.log(`[formatSignalInfo] Using stored region_name: ${packet.region_name}`);
     parts.push(`Region: ${packet.region_name}`);
   } else if (packet.transport_codes) {
-    console.log(`[formatSignalInfo] Using hex codes: ${packet.transport_codes} (no region match)`);
     parts.push(`Region: ${formatTransportCodes(packet.transport_codes)}`);
   }
   return parts.join(' | ');
@@ -96,7 +93,6 @@ export function RawPacketList({ packets, channels, regions, onPacketClick }: Raw
 
   // Identify regions for packets with transport codes
   useEffect(() => {
-    console.log('[RawPacketList] Regions loaded:', regions?.length ?? 0);
     if (!regions || regions.length === 0) return;
 
     const identifyRegions = async () => {
@@ -117,9 +113,6 @@ export function RawPacketList({ packets, channels, regions, onPacketClick }: Raw
 
         attemptedIdentificationRef.current.add(packetKey);
         const regionName = await identifyPacketRegion(packet.data, regions);
-        if (regionName) {
-          console.log(`[RawPacketList] Identified packet ${packetKey} as region: ${regionName}`);
-        }
         newIdentifications.set(packetKey, regionName);
       }
 
