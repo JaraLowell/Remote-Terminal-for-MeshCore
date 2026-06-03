@@ -510,7 +510,9 @@ async def process_raw_packet(
     elif payload_type == PayloadType.ADVERT:
         # Process all advert arrivals (even payload-hash duplicates) so the
         # advert-history table retains recent path observations.
-        await _process_advertisement(raw_bytes, ts, packet_info)
+        await _process_advertisement(
+            raw_bytes, ts, packet_info, transport_codes=transport_codes, region_name=region_name
+        )
 
     elif payload_type == PayloadType.TEXT_MESSAGE:
         # Try to decrypt direct messages using stored private key and known contacts
@@ -626,6 +628,8 @@ async def _process_advertisement(
     raw_bytes: bytes,
     timestamp: int,
     packet_info: PacketInfo | None = None,
+    transport_codes: bytes | None = None,
+    region_name: str | None = None,
 ) -> None:
     """
     Process an advertisement packet.
@@ -659,14 +663,22 @@ async def _process_advertisement(
     # Try to find existing contact
     existing = await ContactRepository.get_by_key(advert.public_key.lower())
 
+    # Log advertisement details including transport codes and region if present
+    transport_info = ""
+    if transport_codes:
+        transport_info = f" transport_codes={transport_codes.hex()}"
+        if region_name:
+            transport_info += f" region={region_name}"
+    
     logger.debug(
-        "Parsed advertisement from %s: %s (role=%d, lat=%s, lon=%s, advert_path_len=%d)",
+        "Parsed advertisement from %s: %s (role=%d, lat=%s, lon=%s, advert_path_len=%d%s)",
         advert.public_key[:12],
         advert.name,
         advert.device_role,
         advert.lat,
         advert.lon,
         new_path_len,
+        transport_info,
     )
 
     # Use device_role from advertisement for contact type (1=Chat, 2=Repeater, 3=Room, 4=Sensor).
