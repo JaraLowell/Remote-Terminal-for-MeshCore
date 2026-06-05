@@ -38,7 +38,7 @@ def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name,
         return None
     
     # Only respond to !test command (case-insensitive)
-    if message_text.strip().lower() != "!test":
+    if message_text.strip().lower() != "!regio":
         return None
     
     # Start building the response with sender name
@@ -46,7 +46,7 @@ def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name,
     response = f"Test received from {sender}"
     
     # Calculate number of hops from path data
-    if path and path_bytes_per_hop:
+    if path and isinstance(path, str) and path_bytes_per_hop:
         # Path is a hex string representing routing hops
         # Each hop is encoded in 1, 2, or 3 bytes depending on path_hash_mode
         # Convert hex string length to byte count, then divide by bytes per hop
@@ -60,7 +60,7 @@ def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name,
         else:
             response += f" with {hop_count} hops"
         
-    elif path:
+    elif path and isinstance(path, str):
         # Legacy: assume 1-byte hops if path_bytes_per_hop not provided
         hop_count = len(path) // 2
         if hop_count == 0:
