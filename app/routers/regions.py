@@ -11,11 +11,12 @@ from app.repository import RegionRepository
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings/regions", tags=["settings", "regions"])
 
-# Common region codes to seed on first startup
+# Common region codes to seed on first startup We might have to figure out a other way
+# as world wide this gone be like 20000+ regions, but for testing/demo purposes we can start with a smaller set of common regions.
 DEFAULT_REGIONS = [
     # Country codes (ISO 3166-1 alpha-2)
     "us", "ca", "mx",  # North America
-    "nl", "de", "uk", "fr", "es", "it", "be", "ch", "at", "se", "no", "dk", "fi", "pl", "cz", "bx", # Europe
+    "nl", "de", "uk", "gb", "fr", "es", "it", "be", "ch", "at", "se", "no", "dk", "fi", "pl", "cz", "bx", # Europe
     "au", "nz",  # Oceania
     "jp", "kr", "cn", "in", "sg",  # Asia
     "br", "ar", "cl",  # South America
@@ -23,7 +24,9 @@ DEFAULT_REGIONS = [
     "eu", "eu-west", "eu-east", "eu-north", "eu-south", "europe", # European regions
     # Common regional/local codes Holland/Netherlands (for testing/demo purposes)
     "nl-dr", "nl-fl", "nl-fr", "nl-ge", "nl-gr", "nl-li", "nl-nb", "nl-nh", "nl-ov", "nl-ut", "nl-ze", "nl-zh",
-    "nl-noord", "nl-zuid", "nl-oost", "nl-west", "nl-midden"
+    "nl-noord", "nl-zuid", "nl-oost", "nl-west", "nl-midden",
+    # NL IATA Regions (for testing/demo purposes)
+    "nl-grq", "nl-lwr", "nl-dhr", "nl-ley", "nl-ens", "nl-ams", "nl-utc", "nl-rtm", "nl-ude", "nl-glz", "nl-ein", "nl-woe", "nl-mst",
 ]
 
 async def seed_default_regions() -> None:
