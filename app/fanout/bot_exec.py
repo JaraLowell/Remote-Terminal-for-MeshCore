@@ -69,14 +69,16 @@ def _analyze_bot_signature(bot_func_or_sig) -> BotCallPlan:
     has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in param_values)
     has_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in param_values)
     explicit_optional_names = tuple(
-        name for name in ("is_outgoing", "path_bytes_per_hop", "packet_hash") if name in params
+        name
+        for name in ("received_at", "is_outgoing", "path_bytes_per_hop", "packet_hash", "region_name")
+        if name in params
     )
     unsupported_required_kwonly = [
         p.name
         for p in param_values
         if p.kind == inspect.Parameter.KEYWORD_ONLY
         and p.default is inspect.Parameter.empty
-        and p.name not in {"is_outgoing", "path_bytes_per_hop", "packet_hash"}
+        and p.name not in {"received_at", "is_outgoing", "path_bytes_per_hop", "packet_hash", "region_name"}
     ]
     if unsupported_required_kwonly:
         raise ValueError(
@@ -98,24 +100,36 @@ def _analyze_bot_signature(bot_func_or_sig) -> BotCallPlan:
     }
     candidate_specs: list[tuple[str, list[object], dict[str, object]]] = []
     keyword_args = dict(base_keyword_args)
+    if has_kwargs or "received_at" in params:
+        keyword_args["received_at"] = 0
     if has_kwargs or "is_outgoing" in params:
         keyword_args["is_outgoing"] = False
     if has_kwargs or "path_bytes_per_hop" in params:
         keyword_args["path_bytes_per_hop"] = 1
     if has_kwargs or "packet_hash" in params:
         keyword_args["packet_hash"] = ""
+    if has_kwargs or "region_name" in params:
+        keyword_args["region_name"] = None
     candidate_specs.append(("keyword", [], keyword_args))
 
     if not has_kwargs and explicit_optional_names:
         kwargs: dict[str, object] = {}
+        if has_kwargs or "received_at" in params:
+            kwargs["received_at"] = 0
         if has_kwargs or "is_outgoing" in params:
             kwargs["is_outgoing"] = False
         if has_kwargs or "path_bytes_per_hop" in params:
             kwargs["path_bytes_per_hop"] = 1
         if has_kwargs or "packet_hash" in params:
             kwargs["packet_hash"] = ""
+        if has_kwargs or "region_name" in params:
+            kwargs["region_name"] = None
         candidate_specs.append(("mixed_keyword", base_args, kwargs))
 
+    if has_varargs or positional_capacity >= 13:
+        candidate_specs.append(("positional_13", base_args + [0, False, 1, "", None], {}))
+    if has_varargs or positional_capacity >= 12:
+        candidate_specs.append(("positional_12", base_args + [False, 1, "", None], {}))
     if has_varargs or positional_capacity >= 11:
         candidate_specs.append(("positional_11", base_args + [False, 1, ""], {}))
     if has_varargs or positional_capacity >= 10:
@@ -139,6 +153,7 @@ def _analyze_bot_signature(bot_func_or_sig) -> BotCallPlan:
         "Supported trailing parameters are: path; path + is_outgoing; "
         "path + path_bytes_per_hop; path + is_outgoing + path_bytes_per_hop; "
         "path + is_outgoing + path_bytes_per_hop + packet_hash; "
+        "path + is_outgoing + path_bytes_per_hop + packet_hash + region_name; "
         "or use **kwargs for forward compatibility."
     )
 
@@ -153,15 +168,17 @@ def execute_bot_code(
     channel_name: str | None,
     sender_timestamp: int | None,
     path: str | None,
+    received_at: int | None = None,
     is_outgoing: bool = False,
     path_bytes_per_hop: int | None = None,
     packet_hash: str | None = None,
+    region_name: str | None = None,
 ) -> str | list[str] | None:
     """
     Execute user-provided bot code with message context.
 
     The code should define a function:
-    `bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name, sender_timestamp, path, is_outgoing, path_bytes_per_hop, packet_hash)`
+    `bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name, sender_timestamp, received_at, path, is_outgoing, path_bytes_per_hop, packet_hash, region_name)`
     or use named parameters / `**kwargs`.
     that returns either None (no response), a string (single response message),
     or a list of strings (multiple messages sent in order).
@@ -178,10 +195,12 @@ def execute_bot_code(
         channel_key: 32-char hex channel key for channel messages, None for DMs
         channel_name: Channel name (e.g. "#general" with hash), None for DMs
         sender_timestamp: Sender's timestamp from the message (may be None)
+        received_at: Unix timestamp when message was received by this radio (may be None)
         path: Hex-encoded routing path (may be None)
         is_outgoing: True if this is our own outgoing message
         path_bytes_per_hop: Number of bytes per routing hop (1, 2, or 3), if known
         packet_hash: MeshCore packet hash (first 16 hex chars of SHA256, uppercase), if known
+        region_name: MeshCore transport region name (e.g., "us", "nl"), if identified
 
     Returns:
         Response string, list of strings, or None.
@@ -217,7 +236,38 @@ def execute_bot_code(
 
     try:
         # Call the bot function with appropriate signature
-        if call_plan.call_style == "positional_11":
+        if call_plan.call_style == "positional_13":
+            result = bot_func(
+                sender_name,
+                sender_key,
+                message_text,
+                is_dm,
+                channel_key,
+                channel_name,
+                sender_timestamp,
+                received_at,
+                path,
+                is_outgoing,
+                path_bytes_per_hop,
+                packet_hash,
+                region_name,
+            )
+        elif call_plan.call_style == "positional_12":
+            result = bot_func(
+                sender_name,
+                sender_key,
+                message_text,
+                is_dm,
+                channel_key,
+                channel_name,
+                sender_timestamp,
+                path,
+                is_outgoing,
+                path_bytes_per_hop,
+                packet_hash,
+                region_name,
+            )
+        elif call_plan.call_style == "positional_11":
             result = bot_func(
                 sender_name,
                 sender_key,
@@ -272,6 +322,8 @@ def execute_bot_code(
                 keyword_args["channel_name"] = channel_name
             if "sender_timestamp" in call_plan.keyword_args:
                 keyword_args["sender_timestamp"] = sender_timestamp
+            if "received_at" in call_plan.keyword_args:
+                keyword_args["received_at"] = received_at
             if "path" in call_plan.keyword_args:
                 keyword_args["path"] = path
             if "is_outgoing" in call_plan.keyword_args:
@@ -280,6 +332,8 @@ def execute_bot_code(
                 keyword_args["path_bytes_per_hop"] = path_bytes_per_hop
             if "packet_hash" in call_plan.keyword_args:
                 keyword_args["packet_hash"] = packet_hash
+            if "region_name" in call_plan.keyword_args:
+                keyword_args["region_name"] = region_name
             result = bot_func(**keyword_args)
         else:
             result = bot_func(

@@ -172,6 +172,17 @@ class RawPacketRepository:
         return row["message_id"]
 
     @staticmethod
+    async def get_region_name(packet_id: int) -> str | None:
+        """Get the region_name for a specific packet ID."""
+        async with db.readonly() as conn:
+            async with conn.execute(
+                "SELECT region_name FROM raw_packets WHERE id = ?",
+                (packet_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+        return row["region_name"] if row else None
+
+    @staticmethod
     async def get_by_id(
         packet_id: int,
     ) -> tuple[int, bytes, int, int | None, bytes | None, str | None] | None:

@@ -495,6 +495,137 @@ def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name,
         )
         assert result is None
 
+    def test_12_param_bot_receives_region_name(self):
+        """Bots that declare region_name receive it positionally as the 12th parameter."""
+        code = """
+def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name, sender_timestamp, path, is_outgoing, path_bytes_per_hop, packet_hash, region_name):
+    return f"region={region_name}"
+"""
+        result = execute_bot_code(
+            code=code,
+            sender_name="Alice",
+            sender_key="abc123",
+            message_text="Hi",
+            is_dm=True,
+            channel_key=None,
+            channel_name=None,
+            sender_timestamp=None,
+            path="aabb",
+            path_bytes_per_hop=2,
+            packet_hash="AABBCCDD",
+            region_name="us",
+        )
+        assert result == "region=us"
+
+    def test_kwargs_bot_receives_region_name(self):
+        """Bots using **kwargs receive the region_name field."""
+        code = """
+def bot(**kwargs):
+    return f"region={kwargs.get('region_name', 'missing')}"
+"""
+        result = execute_bot_code(
+            code=code,
+            sender_name="Alice",
+            sender_key="abc123",
+            message_text="Hi",
+            is_dm=True,
+            channel_key=None,
+            channel_name=None,
+            sender_timestamp=None,
+            path="aabb",
+            region_name="nl",
+        )
+        assert result == "region=nl"
+
+    def test_region_name_none_when_not_identified(self):
+        """region_name is None when the packet region was not identified."""
+        code = """
+def bot(**kwargs):
+    region = kwargs.get('region_name')
+    return f"region={'none' if region is None else region}"
+"""
+        result = execute_bot_code(
+            code=code,
+            sender_name="Alice",
+            sender_key="abc123",
+            message_text="Hi",
+            is_dm=True,
+            channel_key=None,
+            channel_name=None,
+            sender_timestamp=None,
+            path=None,
+            region_name=None,
+        )
+        assert result == "region=none"
+
+    def test_13_param_bot_receives_received_at(self):
+        """Bots that declare received_at receive it positionally as the 8th parameter."""
+        code = """
+def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name, sender_timestamp, received_at, path, is_outgoing, path_bytes_per_hop, packet_hash, region_name):
+    return f"received={received_at}"
+"""
+        result = execute_bot_code(
+            code=code,
+            sender_name="Alice",
+            sender_key="abc123",
+            message_text="Hi",
+            is_dm=True,
+            channel_key=None,
+            channel_name=None,
+            sender_timestamp=1000,
+            received_at=1005,
+            path="aabb",
+            path_bytes_per_hop=2,
+            packet_hash="AABBCCDD",
+            region_name="us",
+        )
+        assert result == "received=1005"
+
+    def test_kwargs_bot_receives_received_at(self):
+        """Bots using **kwargs receive the received_at field."""
+        code = """
+def bot(**kwargs):
+    return f"received={kwargs.get('received_at', 'missing')}"
+"""
+        result = execute_bot_code(
+            code=code,
+            sender_name="Alice",
+            sender_key="abc123",
+            message_text="Hi",
+            is_dm=True,
+            channel_key=None,
+            channel_name=None,
+            sender_timestamp=1000,
+            received_at=1005,
+            path="aabb",
+        )
+        assert result == "received=1005"
+
+    def test_bot_calculates_message_delay(self):
+        """Bot can calculate message delay using sender_timestamp and received_at."""
+        code = """
+def bot(**kwargs):
+    sender_ts = kwargs.get('sender_timestamp')
+    received = kwargs.get('received_at')
+    if sender_ts and received:
+        delay = received - sender_ts
+        return f"Delay: {delay} seconds"
+    return "No timing data"
+"""
+        result = execute_bot_code(
+            code=code,
+            sender_name="Alice",
+            sender_key="abc123",
+            message_text="Test",
+            is_dm=False,
+            channel_key="AABBCCDD",
+            channel_name="#test",
+            sender_timestamp=1000,
+            received_at=1007,
+            path="aabb",
+        )
+        assert result == "Delay: 7 seconds"
+
 
 class TestBotCodeValidation:
     """Test bot code syntax validation via fanout router."""

@@ -96,11 +96,14 @@ def broadcast_message(
     broadcast_fn: BroadcastFn,
     realtime: bool | None = None,
     packet_hash: str | None = None,
+    region_name: str | None = None,
 ) -> None:
     """Broadcast a message payload, preserving the caller's broadcast signature."""
     payload = message.model_dump()
     if packet_hash is not None:
         payload["packet_hash"] = packet_hash
+    if region_name is not None:
+        payload["region_name"] = region_name
     if realtime is None:
         broadcast_fn("message", payload)
     else:
@@ -281,6 +284,9 @@ async def create_message_from_decrypted(
     received = received_at or int(time.time())
     text = f"{sender}: {message_text}" if sender else message_text
     channel_key_normalized = channel_key.upper()
+    
+    # Fetch region_name from raw_packets if packet_id is available
+    region_name = await RawPacketRepository.get_region_name(packet_id) if packet_id else None
 
     resolved_sender_key: str | None = None
     if sender:
@@ -345,6 +351,7 @@ async def create_message_from_decrypted(
         broadcast_fn=broadcast_fn,
         realtime=realtime,
         packet_hash=packet_hash,
+        region_name=region_name,
     )
 
     return msg_id

@@ -233,6 +233,11 @@ async def _store_direct_message(
 
         if packet_id is not None:
             await raw_packet_repository.mark_decrypted(packet_id, msg_id)
+        
+        # Fetch region_name from raw_packets if packet_id is available
+        region_name = (
+            await raw_packet_repository.get_region_name(packet_id) if packet_id else None
+        )
 
         message = build_message_model(
             message_id=msg_id,
@@ -250,7 +255,11 @@ async def _store_direct_message(
             packet_id=packet_id,
         )
         broadcast_message(
-            message=message, broadcast_fn=broadcast_fn, realtime=realtime, packet_hash=packet_hash
+            message=message,
+            broadcast_fn=broadcast_fn,
+            realtime=realtime,
+            packet_hash=packet_hash,
+            region_name=region_name,
         )
 
         if update_last_contacted_key:

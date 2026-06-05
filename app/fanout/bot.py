@@ -130,6 +130,7 @@ class BotModule(FanoutModule):
                 message_text = text
 
         sender_timestamp = data.get("sender_timestamp")
+        received_at = data.get("received_at")
         path_value = data.get("path")
         paths = data.get("paths")
         # Message model serializes paths as list of dicts; extract first path string
@@ -137,6 +138,7 @@ class BotModule(FanoutModule):
             path_value = paths[0].get("path") if isinstance(paths[0], dict) else None
         path_bytes_per_hop = _derive_path_bytes_per_hop(paths, path_value)
         packet_hash = data.get("packet_hash")
+        region_name = data.get("region_name")
 
         # Wait for message to settle (allows retransmissions to be deduped)
         await asyncio.sleep(2)
@@ -159,10 +161,12 @@ class BotModule(FanoutModule):
                         channel_key,
                         channel_name,
                         sender_timestamp,
+                        received_at,
                         path_value,
                         is_outgoing,
                         path_bytes_per_hop,
                         packet_hash,
+                        region_name,
                     ),
                     timeout=BOT_EXECUTION_TIMEOUT,
                 )
