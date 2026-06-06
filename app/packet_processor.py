@@ -229,6 +229,7 @@ async def create_message_from_decrypted(
     channel_name: str | None = None,
     realtime: bool = True,
     packet_hash: str | None = None,
+    region_name: str | None = None,
 ) -> int | None:
     """Store a decrypted channel message via the shared message service."""
     return await _create_message_from_decrypted(
@@ -246,6 +247,7 @@ async def create_message_from_decrypted(
         realtime=realtime,
         broadcast_fn=broadcast_event,
         packet_hash=packet_hash,
+        region_name=region_name,
     )
 
 
@@ -510,7 +512,14 @@ async def process_raw_packet(
     # This is more reliable than trying to look up the message via raw packet linking.
     if payload_type == PayloadType.GROUP_TEXT:
         decrypt_result = await _process_group_text(
-            raw_bytes, packet_id, ts, packet_info, rssi=rssi, snr=snr, packet_hash=pkt_hash
+            raw_bytes,
+            packet_id,
+            ts,
+            packet_info,
+            rssi=rssi,
+            snr=snr,
+            packet_hash=pkt_hash,
+            region_name=region_name,
         )
         if decrypt_result:
             result.update(decrypt_result)
@@ -570,6 +579,7 @@ async def _process_group_text(
     rssi: int | None = None,
     snr: float | None = None,
     packet_hash: str | None = None,
+    region_name: str | None = None,
 ) -> dict | None:
     """
     Process a GroupText (channel message) packet.
@@ -618,6 +628,7 @@ async def _process_group_text(
             rssi=rssi,
             snr=snr,
             packet_hash=packet_hash,
+            region_name=region_name,
         )
 
         return {

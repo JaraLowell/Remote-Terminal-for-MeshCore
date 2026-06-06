@@ -279,14 +279,16 @@ async def create_message_from_decrypted(
     realtime: bool = True,
     broadcast_fn: BroadcastFn,
     packet_hash: str | None = None,
+    region_name: str | None = None,
 ) -> int | None:
     """Store and broadcast a decrypted channel message."""
     received = received_at or int(time.time())
     text = f"{sender}: {message_text}" if sender else message_text
     channel_key_normalized = channel_key.upper()
     
-    # Fetch region_name from raw_packets if packet_id is available
-    region_name = await RawPacketRepository.get_region_name(packet_id) if packet_id else None
+    # Fetch region_name from raw_packets if not provided and packet_id is available
+    if region_name is None and packet_id:
+        region_name = await RawPacketRepository.get_region_name(packet_id)
 
     resolved_sender_key: str | None = None
     if sender:

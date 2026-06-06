@@ -38,7 +38,7 @@ def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name,
         return None
     
     # Only respond to !test command (case-insensitive)
-    if message_text.strip().lower() != "!regio":
+    if message_text.strip().lower() != "!test":
         return None
     
     # Start building the response with sender name
@@ -84,7 +84,7 @@ def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name,
     if region_name:
         response += f". Region: {region_name}"
     else:
-        response += ". No Region or unknown region!"
+        response += ". Region: unknown"
     
     return response
 
