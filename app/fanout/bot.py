@@ -132,6 +132,9 @@ class BotModule(FanoutModule):
         sender_timestamp = data.get("sender_timestamp")
         received_at = data.get("received_at")
         path_value = data.get("path")
+        # Legacy: convert integer path to hex string
+        if path_value is not None and isinstance(path_value, int):
+            path_value = f"{path_value:X}"
         paths = data.get("paths")
         # Message model serializes paths as list of dicts; extract first path string
         if path_value is None and paths and isinstance(paths, list) and len(paths) > 0:

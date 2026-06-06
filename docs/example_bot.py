@@ -72,7 +72,7 @@ def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name,
         response += " (path unknown)"
     
     # Calculate message delay if both timestamps are available
-    if sender_timestamp and received_at:
+    if sender_timestamp and received_at and isinstance(sender_timestamp, int) and isinstance(received_at, int):
         delay_seconds = received_at - sender_timestamp
         if delay_seconds >= 0:
             response += f". It took {delay_seconds} second{'s' if delay_seconds != 1 else ''} to reach me"
@@ -84,7 +84,7 @@ def bot(sender_name, sender_key, message_text, is_dm, channel_key, channel_name,
     if region_name:
         response += f". Region: {region_name}"
     else:
-        response += ". Region: unknown"
+        response += ". No Region or unknown region!"
     
     return response
 
