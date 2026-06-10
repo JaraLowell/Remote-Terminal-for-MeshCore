@@ -59,9 +59,12 @@ async def test_db():
 
     # Also patch the db reference used by the packets router for VACUUM
     import app.routers.packets as packets_module
+    import app.packet_processor as packet_processor_module
 
     original_packets_db = packets_module.db
     packets_module.db = db
+    original_packet_processor_db = packet_processor_module.db
+    packet_processor_module.db = db
 
     try:
         yield db
@@ -69,6 +72,7 @@ async def test_db():
         for mod, original in originals:
             mod.db = original
         packets_module.db = original_packets_db
+        packet_processor_module.db = original_packet_processor_db
         await db.disconnect()
 
 

@@ -1044,6 +1044,35 @@ async def _process_path_packet(
     )
 
 
+def _haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate the great-circle distance between two points on Earth in kilometers.
+    Uses the Haversine formula.
+    
+    Args:
+        lat1, lon1: First point coordinates (decimal degrees)
+        lat2, lon2: Second point coordinates (decimal degrees)
+    
+    Returns:
+        Distance in kilometers
+    """
+    from math import radians, sin, cos, sqrt, atan2
+
+    R = 6371  # Earth radius in kilometers
+
+    # Convert to radians
+    lat1_rad = radians(lat1)
+    lat2_rad = radians(lat2)
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+
+    # Haversine formula
+    a = sin(dlat / 2) ** 2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    
+    return R * c
+
+
 async def _update_last_seen_for_path_hops(
     path_hex: str,
     hop_count: int,
@@ -1057,6 +1086,10 @@ async def _update_last_seen_for_path_hops(
     hops are evidence of active contacts on the network. This function
     extracts hop identifiers from the path and updates last_seen for any
     matching contacts we already know about.
+
+    To avoid false positives from hash collisions, we use geographic proximity
+    filtering: only update last_seen if consecutive hops are within 15km of
+    each other (or if GPS data is unavailable for verification).
 
     Hash size determines hop identifier length:
     - hash_size=1 (1-byte): "75" matches contacts starting with "75..."
@@ -1080,23 +1113,34 @@ async def _update_last_seen_for_path_hops(
     if not hop_identifiers:
         return
 
-    matched_keys: set[str] = set()
+    # Maximum plausible distance between consecutive hops in kilometers
+    # LoRa can reach 10-15km typically, so 15km is a reasonable threshold
+    MAX_HOP_DISTANCE_KM = 20.0
 
+    # Resolve hop identifiers to contacts with position tracking
+    hop_contacts: list[Contact | None] = []
+    
     # Validate hop identifier length based on hash_size
     expected_prefix_len = hash_size * 2  # 1-byte=2 chars, 2-byte=4 chars, 3-byte=6 chars
 
     # For 1-byte mode: use efficient indexed query per hop
-    # For 2-byte/3-byte mode: load all contacts and match in memory (fewer matches)
+    # For 2-byte/3-byte mode: load all contacts once and match in memory (fewer matches)
     if hash_size == 1:
-        # Optimize for 1-byte mode using indexed query
+        # Optimize for 1-byte mode using indexed query per hop
         for hop_id in hop_identifiers:
             if not hop_id or len(hop_id) != expected_prefix_len:
+                hop_contacts.append(None)
                 continue
 
             # Use indexed query on first byte (2 hex chars)
             candidates = await ContactRepository.get_by_pubkey_first_byte(hop_id.lower())
-            for contact in candidates:
-                matched_keys.add(contact.public_key)
+            
+            # If exactly one match, use it; otherwise mark as ambiguous
+            if len(candidates) == 1:
+                hop_contacts.append(candidates[0])
+            else:
+                # Multiple matches or no matches - can't determine which contact this is
+                hop_contacts.append(None)
     else:
         # For 2-byte and 3-byte modes, load all contacts once and match in memory
         # This is more efficient since longer prefixes will have fewer matches
@@ -1106,29 +1150,78 @@ async def _update_last_seen_for_path_hops(
 
         for hop_id in hop_identifiers:
             if not hop_id or len(hop_id) != expected_prefix_len:
+                hop_contacts.append(None)
                 continue
 
             hop_prefix = hop_id.lower()
 
             # Find contacts whose public key starts with this hop identifier
-            for contact in all_contacts:
-                if contact.public_key.lower().startswith(hop_prefix):
-                    matched_keys.add(contact.public_key)
+            matches = [c for c in all_contacts if c.public_key.lower().startswith(hop_prefix)]
+            
+            # Only use if exactly one match
+            if len(matches) == 1:
+                hop_contacts.append(matches[0])
+            else:
+                hop_contacts.append(None)
 
-    # Update last_seen for all matched contacts and broadcast to frontend
-    if not matched_keys:
+    # Now apply geographic proximity filter to determine which contacts to update
+    verified_keys: set[str] = set()
+    filtered_count = 0
+
+    for i, contact in enumerate(hop_contacts):
+        if contact is None:
+            continue
+        
+        # Check distance from previous hop (if available)
+        if i > 0:
+            prev_contact = hop_contacts[i - 1]
+            
+            # If both hops have GPS data, check distance
+            if (prev_contact is not None and
+                prev_contact.lat is not None and prev_contact.lon is not None and
+                contact.lat is not None and contact.lon is not None):
+                
+                distance_km = _haversine_distance_km(
+                    prev_contact.lat, prev_contact.lon,
+                    contact.lat, contact.lon
+                )
+                
+                if distance_km > MAX_HOP_DISTANCE_KM:
+                    # Too far apart - likely a hash collision
+                    logger.debug(
+                        "Skipping last_seen update for %s: %.1fkm from previous hop %s (beyond %dkm threshold)",
+                        contact.public_key[:12],
+                        distance_km,
+                        prev_contact.public_key[:12],
+                        MAX_HOP_DISTANCE_KM,
+                    )
+                    filtered_count += 1
+                    continue
+        
+        # Either within range, or can't verify (missing GPS) - update it
+        verified_keys.add(contact.public_key)
+
+    # Update last_seen for verified contacts and broadcast to frontend
+    if not verified_keys:
+        if filtered_count > 0:
+            logger.info(
+                "Filtered %d hop%s from %d-byte path due to geographic implausibility",
+                filtered_count,
+                "s" if filtered_count != 1 else "",
+                hash_size,
+            )
         return
 
-    for public_key in matched_keys:
+    for public_key in verified_keys:
         await ContactRepository.touch_last_seen(public_key, timestamp)
 
     # Batch-fetch updated contacts and broadcast to frontend for real-time Map panel updates
     # This ensures the Node Map panel shows updated "last seen" times immediately
     async with db.readonly() as conn:
-        placeholders = ",".join("?" * len(matched_keys))
+        placeholders = ",".join("?" * len(verified_keys))
         async with conn.execute(
             f"SELECT * FROM contacts WHERE public_key IN ({placeholders})",
-            tuple(matched_keys),
+            tuple(verified_keys),
         ) as cursor:
             rows = await cursor.fetchall()
 
@@ -1137,11 +1230,12 @@ async def _update_last_seen_for_path_hops(
         broadcast_event("contact", contact.model_dump())
 
     logger.info(
-        "Updated last_seen for %d contact%s from %d-byte path (%d hop%s: %s)",
-        len(matched_keys),
-        "s" if len(matched_keys) != 1 else "",
+        "Updated last_seen for %d contact%s from %d-byte path (%d hop%s: %s)%s",
+        len(verified_keys),
+        "s" if len(verified_keys) != 1 else "",
         hash_size,
         hop_count,
         "s" if hop_count != 1 else "",
         ", ".join(hop_identifiers[:3]) + ("..." if len(hop_identifiers) > 3 else ""),
+        f" (filtered {filtered_count} geographic outliers)" if filtered_count > 0 else "",
     )
