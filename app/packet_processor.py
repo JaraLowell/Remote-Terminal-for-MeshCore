@@ -1115,7 +1115,7 @@ async def _update_last_seen_for_path_hops(
 
     # Maximum plausible distance between consecutive hops in kilometers
     # LoRa can reach 10-15km typically, so 15km is a reasonable threshold
-    MAX_HOP_DISTANCE_KM = 20.0
+    MAX_HOP_DISTANCE_KM = 26.0
 
     # Resolve hop identifiers to contacts with position tracking
     hop_contacts: list[Contact | None] = []
