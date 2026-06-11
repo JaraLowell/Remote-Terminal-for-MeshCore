@@ -116,9 +116,9 @@ The following are **deliberate design choices**, not bugs. They are documented i
 
 Raw packet handling uses two identities by design:
 - **`id` (DB packet row ID)**: storage identity from payload-hash deduplication (path bytes are excluded), so repeated payloads share one stored raw-packet row.
-- **`observation_id` (WebSocket only)**: realtime observation identity, unique per RF arrival, so path-diverse repeats are still visible in-session.
+- **`observation_id` (WebSocket only)**: realtime observation identity, unique per RF arrival, enabling fine-grained stats tracking.
 
-Frontend packet-feed consumers should treat `observation_id` as the dedup/render key, while `id` remains the storage reference.
+The frontend Raw Packet Feed uses `id` for deduplication: when the same packet propagates through different paths (same payload, new observation), the existing packet box is updated rather than creating a new box. This consolidates repeated packets with expanding path information into a single UI element. Stats tracking still uses `observation_id` to count every RF arrival.
 
 Channel metadata updates may also fan out as `channel` WebSocket events (full `Channel` payload) so clients can reflect local-only channel state such as regional flood-scope overrides without a full refetch.
 

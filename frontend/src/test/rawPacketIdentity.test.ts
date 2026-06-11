@@ -19,28 +19,29 @@ function createPacket(overrides: Partial<RawPacket> = {}): RawPacket {
 }
 
 describe('getRawPacketObservationKey', () => {
-  it('uses observation_id when present', () => {
+  it('always uses db id for packet feed deduplication', () => {
     const packet = createPacket({ id: 99, observation_id: 7 });
-    expect(getRawPacketObservationKey(packet)).toBe('obs-7');
+    expect(getRawPacketObservationKey(packet)).toBe('db-99');
   });
 
-  it('falls back to db id when observation_id is missing', () => {
+  it('uses db id when observation_id is missing', () => {
     const packet = createPacket({ id: 42 });
     expect(getRawPacketObservationKey(packet)).toBe('db-42');
   });
 });
 
 describe('appendRawPacketUnique', () => {
-  it('keeps path-diverse observations with same db id', () => {
+  it('updates existing packet when same db id arrives with new observation', () => {
     const first = createPacket({ id: 5, observation_id: 100, data: 'aa' });
     const second = createPacket({ id: 5, observation_id: 101, data: 'bb' });
 
     const afterFirst = appendRawPacketUnique([], first, 500);
     const afterSecond = appendRawPacketUnique(afterFirst, second, 500);
 
-    expect(afterSecond).toHaveLength(2);
-    expect(afterSecond[0].observation_id).toBe(100);
-    expect(afterSecond[1].observation_id).toBe(101);
+    // Should have 1 packet (updated), not 2
+    expect(afterSecond).toHaveLength(1);
+    expect(afterSecond[0].observation_id).toBe(101);
+    expect(afterSecond[0].data).toBe('bb');
   });
 
   it('drops exact duplicate observations', () => {
@@ -60,6 +61,7 @@ describe('appendRawPacketUnique', () => {
     const afterSecond = appendRawPacketUnique(afterFirst, second, 500);
 
     expect(afterSecond).toHaveLength(1);
+    expect(afterSecond[0].timestamp).toBe(1700000001);
   });
 
   it('enforces max packet cap', () => {
@@ -75,7 +77,7 @@ describe('appendRawPacketUnique', () => {
     state = appendRawPacketUnique(state, packets[2], 2);
 
     expect(state).toHaveLength(2);
-    expect(state[0].observation_id).toBe(2);
-    expect(state[1].observation_id).toBe(3);
+    expect(state[0].id).toBe(2);
+    expect(state[1].id).toBe(3);
   });
 });

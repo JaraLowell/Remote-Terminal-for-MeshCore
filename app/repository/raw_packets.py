@@ -183,6 +183,38 @@ class RawPacketRepository:
         return row["region_name"] if row else None
 
     @staticmethod
+    async def find_by_timestamp_proximity(
+        timestamp: int,
+        window_seconds: int = 5,
+    ) -> dict | None:
+        """
+        Find a raw packet close to the given timestamp.
+        
+        This is used as a fallback when we don't have a packet_id but want to
+        correlate a message event with its raw packet (e.g., from CONTACT_MSG_RECV).
+        
+        Returns dict with keys: id, data, timestamp, region_name, or None if not found.
+        """
+        async with db.readonly() as conn:
+            async with conn.execute(
+                "SELECT id, data, timestamp, region_name "
+                "FROM raw_packets "
+                "WHERE ABS(timestamp - ?) <= ? "
+                "ORDER BY ABS(timestamp - ?) ASC "
+                "LIMIT 1",
+                (timestamp, window_seconds, timestamp),
+            ) as cursor:
+                row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "data": bytes(row["data"]).hex(),
+            "timestamp": row["timestamp"],
+            "region_name": row["region_name"],
+        }
+
+    @staticmethod
     async def get_by_id(
         packet_id: int,
     ) -> tuple[int, bytes, int, int | None, bytes | None, str | None] | None:

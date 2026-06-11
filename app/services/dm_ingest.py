@@ -235,10 +235,36 @@ async def _store_direct_message(
         if packet_id is not None:
             await raw_packet_repository.mark_decrypted(packet_id, msg_id)
         
-        # Fetch region_name from raw_packets if not provided and packet_id is available
+        # Fetch region_name from raw_packets if not provided
+        # Try by packet_id first, then fall back to timestamp-based lookup
         resolved_region_name = region_name
-        if resolved_region_name is None and packet_id:
-            resolved_region_name = await raw_packet_repository.get_region_name(packet_id)
+        resolved_packet_hash = packet_hash
+        resolved_packet_id = packet_id
+        
+        if resolved_region_name is None or resolved_packet_hash is None:
+            if packet_id:
+                # We have packet_id, fetch directly
+                resolved_region_name = resolved_region_name or await raw_packet_repository.get_region_name(packet_id)
+            else:
+                # Fallback path: try to find the raw packet by timestamp proximity
+                # This helps when the message comes from CONTACT_MSG_RECV event rather than RX_LOG_DATA
+                recent_packet = await raw_packet_repository.find_by_timestamp_proximity(
+                    timestamp=sender_timestamp,
+                    window_seconds=5,
+                )
+                if recent_packet:
+                    resolved_packet_id = recent_packet["id"]
+                    resolved_region_name = resolved_region_name or recent_packet.get("region_name")
+                    if resolved_packet_hash is None:
+                        # Compute packet hash if not already available
+                        from app.packet_processor import calculate_packet_hash
+                        packet_data_hex = recent_packet.get("data")
+                        if packet_data_hex:
+                            try:
+                                packet_bytes = bytes.fromhex(packet_data_hex)
+                                resolved_packet_hash = calculate_packet_hash(packet_bytes)
+                            except (ValueError, TypeError):
+                                pass
 
         message = build_message_model(
             message_id=msg_id,

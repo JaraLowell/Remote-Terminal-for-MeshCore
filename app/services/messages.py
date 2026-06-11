@@ -410,6 +410,7 @@ async def create_fallback_channel_message(
     channel_name: str | None,
     broadcast_fn: BroadcastFn,
     message_repository=MessageRepository,
+    raw_packet_repository=RawPacketRepository,
 ) -> Message | None:
     """Store and broadcast a CHANNEL_MSG_RECV fallback channel message."""
     conversation_key_normalized = conversation_key.upper()
@@ -448,6 +449,28 @@ async def create_fallback_channel_message(
         )
         return None
 
+    # Try to find the corresponding raw packet to extract region_name and packet_hash
+    resolved_region_name: str | None = None
+    resolved_packet_hash: str | None = None
+    resolved_packet_id: int | None = None
+    
+    recent_packet = await raw_packet_repository.find_by_timestamp_proximity(
+        timestamp=sender_timestamp,
+        window_seconds=5,
+    )
+    if recent_packet:
+        resolved_packet_id = recent_packet["id"]
+        resolved_region_name = recent_packet.get("region_name")
+        # Compute packet hash if packet data is available
+        packet_data_hex = recent_packet.get("data")
+        if packet_data_hex:
+            try:
+                from app.packet_processor import calculate_packet_hash
+                packet_bytes = bytes.fromhex(packet_data_hex)
+                resolved_packet_hash = calculate_packet_hash(packet_bytes)
+            except (ValueError, TypeError):
+                pass
+
     message = build_message_model(
         message_id=msg_id,
         msg_type="CHAN",
@@ -460,8 +483,14 @@ async def create_fallback_channel_message(
         sender_name=sender_name,
         sender_key=resolved_sender_key,
         channel_name=channel_name,
+        packet_id=resolved_packet_id,
     )
-    broadcast_message(message=message, broadcast_fn=broadcast_fn)
+    broadcast_message(
+        message=message,
+        broadcast_fn=broadcast_fn,
+        packet_hash=resolved_packet_hash,
+        region_name=resolved_region_name,
+    )
     return message
 
 
