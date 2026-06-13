@@ -1215,7 +1215,7 @@ class TestSyncAndOffloadChannels:
         channel_result.type = EventType.CHANNEL_INFO
         channel_result.payload = {
             "channel_name": "#general",
-            "channel_secret": bytes.fromhex("8B3387E9C5CDEA6AC9E5EDBAA115CD72"),
+            "channel_secret": bytes.fromhex("AABBCCDD" * 4),  # Different key, not Public channel
         }
 
         # All other slots return non-CHANNEL_INFO
@@ -1235,7 +1235,7 @@ class TestSyncAndOffloadChannels:
         assert result["cleared"] == 1
 
         # Verify channel is in real DB
-        channel = await ChannelRepository.get_by_key("8B3387E9C5CDEA6AC9E5EDBAA115CD72")
+        channel = await ChannelRepository.get_by_key("AABBCCDDAABBCCDDAABBCCDDAABBCCDD")
         assert channel is not None
         assert channel.name == "#general"
         assert channel.is_hashtag is True
@@ -1316,6 +1316,35 @@ class TestSyncAndOffloadChannels:
 
         channel = await ChannelRepository.get_by_key("8B3387E9C5CDEA6AC9E5EDBAA115CD72")
         assert channel is not None
+        assert channel.is_hashtag is False
+
+    @pytest.mark.asyncio
+    async def test_public_channel_normalized_from_lowercase(self, test_db):
+        """Public channel name is normalized to 'Public' even when radio reports 'public'."""
+        from app.radio_sync import sync_and_offload_channels
+
+        channel_result = MagicMock()
+        channel_result.type = EventType.CHANNEL_INFO
+        channel_result.payload = {
+            "channel_name": "public",  # Radio reports lowercase
+            "channel_secret": bytes.fromhex("8B3387E9C5CDEA6AC9E5EDBAA115CD72"),
+        }
+
+        other_result = MagicMock()
+        other_result.type = EventType.ERROR
+
+        mock_mc = MagicMock()
+        mock_mc.commands.get_channel = AsyncMock(side_effect=[channel_result] + [other_result] * 39)
+
+        clear_result = MagicMock()
+        clear_result.type = EventType.OK
+        mock_mc.commands.set_channel = AsyncMock(return_value=clear_result)
+
+        await sync_and_offload_channels(mock_mc)
+
+        channel = await ChannelRepository.get_by_key("8B3387E9C5CDEA6AC9E5EDBAA115CD72")
+        assert channel is not None
+        assert channel.name == "Public"  # Normalized to canonical form
         assert channel.is_hashtag is False
 
     @pytest.mark.asyncio

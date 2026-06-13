@@ -147,6 +147,10 @@ async def upsert_channel_from_radio_slot(payload: dict, *, on_radio: bool) -> st
     key_bytes = secret if isinstance(secret, bytes) else bytes(secret)
     key_hex = key_bytes.hex().upper()
 
+    # Normalize Public channel name to canonical form regardless of radio's case
+    if key_hex == PUBLIC_CHANNEL_KEY:
+        name = PUBLIC_CHANNEL_NAME
+
     await ChannelRepository.upsert(
         key=key_hex,
         name=name,
