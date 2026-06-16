@@ -860,7 +860,8 @@ async def _process_location(
 
     # Try to match the node_id (first 4 bytes of public key) to an existing contact
     # node_id is 8 hex chars, so we search for contacts whose public key starts with it
-    matching_contacts = await ContactRepository.get_all()
+    # Use a very high limit to search ALL contacts, not just the first 100
+    matching_contacts = await ContactRepository.get_all(limit=999999)
     contact = None
     for c in matching_contacts:
         if c.public_key.lower().startswith(location.node_id.lower()):
@@ -1322,7 +1323,7 @@ async def _update_last_seen_for_path_hops(
     else:
         # For 2-byte and 3-byte modes, load all contacts once and match in memory
         # This is more efficient since longer prefixes will have fewer matches
-        all_contacts = await ContactRepository.get_all(limit=10000)
+        all_contacts = await ContactRepository.get_all(limit=999999)
         if not all_contacts:
             return
 
