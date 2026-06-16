@@ -1048,7 +1048,7 @@ export function MapView({
               contact.last_seen != null
                 ? formatTime(contact.last_seen)
                 : 'Never heard by this server';
-            const radius = isRepeater ? 10 : 7;
+            const radius = isRepeater ? 7 : 5;
 
             // Custom icon for trackers
             const trackerIcon = isTracker
