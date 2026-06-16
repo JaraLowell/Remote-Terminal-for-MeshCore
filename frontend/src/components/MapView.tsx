@@ -545,28 +545,38 @@ export function MapView({
   const [showTrails, setShowTrails] = useState(false);
   const [trackerTrails, setTrackerTrails] = useState<Map<string, LocationHistory[]>>(new Map());
 
-  // Fetch tracker location history trails
+  // Fetch tracker location history trails with auto-refresh
   useEffect(() => {
     if (!showTrails) {
       setTrackerTrails(new Map());
       return;
     }
 
-    api
-      .getAllTrackerLocationHistory()
-      .then((data) => {
-        const trails = new Map<string, LocationHistory[]>();
-        data.forEach(({ contact, history }) => {
-          if (history.length > 1) {
-            // Only include trails with 2+ points
-            trails.set(contact.public_key, history);
-          }
+    const fetchTrails = () => {
+      api
+        .getAllTrackerLocationHistory()
+        .then((data) => {
+          const trails = new Map<string, LocationHistory[]>();
+          data.forEach(({ contact, history }) => {
+            if (history.length > 1) {
+              // Only include trails with 2+ points
+              trails.set(contact.public_key, history);
+            }
+          });
+          setTrackerTrails(trails);
+        })
+        .catch((err) => {
+          console.error('Failed to fetch tracker location history:', err);
         });
-        setTrackerTrails(trails);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch tracker location history:', err);
-      });
+    };
+
+    // Fetch immediately
+    fetchTrails();
+
+    // Refresh every 30 seconds to capture new tracker positions
+    const interval = setInterval(fetchTrails, 30000);
+
+    return () => clearInterval(interval);
   }, [showTrails]);
 
   // Build prefix index and name index for hop resolution
