@@ -167,7 +167,7 @@ const MAP_RECENCY_COLORS = {
   old: '#64748b',
 } as const;
 const MAP_MARKER_STROKE = '#48b794';
-const MAP_REPEATER_RING = '#e3742a';
+const MAP_REPEATER_RING = '#ffffff';
 
 // --- Packet visualization constants ---
 const THREE_DAYS_SEC = 3 * 24 * 60 * 60;
