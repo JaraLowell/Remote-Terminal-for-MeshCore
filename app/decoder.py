@@ -402,19 +402,19 @@ def parse_location(payload: bytes) -> ParsedLocation | None:
     """
     Parse a LOCATION tracker payload (0x0D).
 
-    Payload structure:
+    Payload structure (all multi-byte fields are big-endian / network byte order):
     - Bytes 0-3: magic ("MCL1")
     - Byte 4: version (currently 1)
     - Byte 5: flags (reserved)
-    - Bytes 6-9: node_id (first 4 bytes of sender identity)
-    - Bytes 10-13: lat (signed int32 LE, microdegrees)
-    - Bytes 14-17: lon (signed int32 LE, microdegrees)
-    - Bytes 18-19: altitude (signed int16 LE, metres)
-    - Bytes 20-21: speed (uint16 LE, cm/s)
-    - Bytes 22-23: heading (uint16 LE, centidegrees)
+    - Bytes 6-9: node_id (first 4 bytes of sender identity, BE)
+    - Bytes 10-13: lat (signed int32 BE, microdegrees)
+    - Bytes 14-17: lon (signed int32 BE, microdegrees)
+    - Bytes 18-19: altitude (signed int16 BE, metres)
+    - Bytes 20-21: speed (uint16 BE, cm/s)
+    - Bytes 22-23: heading (uint16 BE, centidegrees)
     - Byte 24: satellites
-    - Bytes 25-26: battery (uint16 LE, millivolts)
-    - Bytes 27-30: timestamp (uint32 LE, Unix time)
+    - Bytes 25-26: battery (uint16 BE, millivolts)
+    - Bytes 27-30: timestamp (uint32 BE, Unix time)
     - Byte 31: name_len (0-24)
     - Bytes 32+: name (UTF-8, up to 24 bytes)
     """
@@ -432,9 +432,9 @@ def parse_location(payload: bytes) -> ParsedLocation | None:
     flags = payload[5]
     node_id = payload[6:10].hex()
 
-    # Parse coordinates (signed int32, microdegrees)
-    lat_micro = int.from_bytes(payload[10:14], "little", signed=True)
-    lon_micro = int.from_bytes(payload[14:18], "little", signed=True)
+    # Parse coordinates (signed int32 big-endian, microdegrees)
+    lat_micro = int.from_bytes(payload[10:14], "big", signed=True)
+    lon_micro = int.from_bytes(payload[14:18], "big", signed=True)
     lat = lat_micro / 1_000_000.0
     lon = lon_micro / 1_000_000.0
 
@@ -447,24 +447,24 @@ def parse_location(payload: bytes) -> ParsedLocation | None:
         )
         return None
 
-    # Parse altitude (signed int16, metres)
-    altitude = int.from_bytes(payload[18:20], "little", signed=True)
+    # Parse altitude (signed int16 BE, metres)
+    altitude = int.from_bytes(payload[18:20], "big", signed=True)
 
-    # Parse speed (uint16, cm/s) and convert to m/s
-    speed_cm = int.from_bytes(payload[20:22], "little", signed=False)
+    # Parse speed (uint16 BE, cm/s) and convert to m/s
+    speed_cm = int.from_bytes(payload[20:22], "big", signed=False)
     speed = speed_cm / 100.0
 
-    # Parse heading (uint16, centidegrees) and convert to degrees
-    heading_centi = int.from_bytes(payload[22:24], "little", signed=False)
+    # Parse heading (uint16 BE, centidegrees) and convert to degrees
+    heading_centi = int.from_bytes(payload[22:24], "big", signed=False)
     heading = heading_centi / 100.0
 
     satellites = payload[24]
 
-    # Parse battery (uint16, millivolts)
-    battery = int.from_bytes(payload[25:27], "little", signed=False)
+    # Parse battery (uint16 BE, millivolts)
+    battery = int.from_bytes(payload[25:27], "big", signed=False)
 
-    # Parse timestamp (uint32, Unix time)
-    timestamp = int.from_bytes(payload[27:31], "little", signed=False)
+    # Parse timestamp (uint32 BE, Unix time)
+    timestamp = int.from_bytes(payload[27:31], "big", signed=False)
 
     # Parse name
     name_len = payload[31]
