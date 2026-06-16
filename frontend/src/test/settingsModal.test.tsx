@@ -866,6 +866,8 @@ describe('SettingsModal', () => {
           first_seen: null,
           effective_route: { path: 'aabb', path_len: 1, path_hash_mode: 1 },
           effective_route_source: 'direct',
+          is_tracker: false,
+          tracker_name: null,
         },
       ],
     });

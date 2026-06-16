@@ -28,6 +28,8 @@ function makeContact(
     last_contacted: null,
     last_read_at: null,
     first_seen: null,
+    is_tracker: false,
+    tracker_name: null,
     ...overrides,
   };
 }

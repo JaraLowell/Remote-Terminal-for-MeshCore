@@ -251,6 +251,8 @@ describe('SearchView', () => {
             last_contacted: null,
             first_seen: null,
             last_read_at: null,
+            is_tracker: false,
+            tracker_name: null,
           },
         ]}
       />

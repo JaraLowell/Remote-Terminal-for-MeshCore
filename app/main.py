@@ -127,6 +127,11 @@ async def lifespan(app: FastAPI):
 
     await start_radio_stats_sampling()
 
+    # Start periodic location history cleanup task
+    from app.radio_sync import start_location_history_cleanup
+
+    await start_location_history_cleanup()
+
     # Always start connection monitor (even if initial connection failed)
     await radio_manager.start_connection_monitor()
 
@@ -155,6 +160,9 @@ async def lifespan(app: FastAPI):
     await stop_background_contact_reconciliation()
     await stop_message_polling()
     await stop_radio_stats_sampling()
+    from app.radio_sync import stop_location_history_cleanup
+
+    await stop_location_history_cleanup()
     await stop_periodic_advert()
     await stop_periodic_sync()
     await stop_telemetry_collect()

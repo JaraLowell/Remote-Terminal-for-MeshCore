@@ -204,6 +204,10 @@ _telemetry_collect_task: asyncio.Task | None = None
 # the shortest-legal interval for the current tracked-repeater count.
 TELEMETRY_COLLECT_INITIAL_DELAY = 60
 
+# Location history cleanup task handle and interval (daily)
+_location_history_cleanup_task: asyncio.Task | None = None
+LOCATION_HISTORY_CLEANUP_INTERVAL = 86400  # 24 hours
+
 # Counter to pause polling during repeater operations (supports nested pauses)
 _polling_pause_count: int = 0
 
@@ -2184,3 +2188,47 @@ async def stop_telemetry_collect() -> None:
             pass
         _telemetry_collect_task = None
         logger.info("Stopped periodic telemetry collection")
+
+
+# --- Location History Cleanup ---
+
+
+async def _location_history_cleanup_loop():
+    """Background task that periodically prunes old location history entries."""
+    from app.repository.location_history import LocationHistoryRepository
+    from app.repository.settings import SettingsRepository
+
+    logger.info("Location history cleanup task started")
+    while True:
+        try:
+            await asyncio.sleep(LOCATION_HISTORY_CLEANUP_INTERVAL)
+            settings = await SettingsRepository.get()
+            retention_hours = settings.get("tracker_history_hours", 12)
+            deleted = await LocationHistoryRepository.prune_old_entries(retention_hours)
+            if deleted > 0:
+                logger.debug("Pruned %d old location history entries", deleted)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Location history cleanup failed")
+
+
+async def start_location_history_cleanup() -> None:
+    """Start the periodic location history cleanup background task."""
+    global _location_history_cleanup_task
+    if _location_history_cleanup_task is None or _location_history_cleanup_task.done():
+        _location_history_cleanup_task = asyncio.create_task(_location_history_cleanup_loop())
+        logger.info("Started periodic location history cleanup (interval: %ds)", LOCATION_HISTORY_CLEANUP_INTERVAL)
+
+
+async def stop_location_history_cleanup() -> None:
+    """Stop the periodic location history cleanup background task."""
+    global _location_history_cleanup_task
+    if _location_history_cleanup_task and not _location_history_cleanup_task.done():
+        _location_history_cleanup_task.cancel()
+        try:
+            await _location_history_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        _location_history_cleanup_task = None
+        logger.info("Stopped periodic location history cleanup")

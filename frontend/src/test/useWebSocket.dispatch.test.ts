@@ -122,7 +122,8 @@ describe('useWebSocket dispatch', () => {
       on_radio: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     };
     fireMessage({
       type: 'contact_resolved',

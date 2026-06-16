@@ -115,7 +115,8 @@ describe('useRealtimeAppState', () => {
         favorite: false,
         last_contacted: null,
         last_read_at: null,
-        first_seen: null,
+        first_seen: null,is_tracker: false,
+      tracker_name: null,
       },
     ];
 
@@ -158,7 +159,8 @@ describe('useRealtimeAppState', () => {
         favorite: false,
         last_contacted: null,
         last_read_at: null,
-        first_seen: null,
+        first_seen: null,is_tracker: false,
+      tracker_name: null,
       },
     ];
 
@@ -249,7 +251,8 @@ describe('useRealtimeAppState', () => {
       favorite: false,
       last_contacted: 1700000000,
       last_read_at: null,
-      first_seen: 1700000000,
+      first_seen: 1700000000,is_tracker: false,
+      tracker_name: null,
     };
     const activeConversationRef = {
       current: {

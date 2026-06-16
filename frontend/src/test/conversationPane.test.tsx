@@ -206,6 +206,8 @@ describe('ConversationPane', () => {
               last_contacted: null,
               last_read_at: null,
               first_seen: null,
+              is_tracker: false,
+              tracker_name: null,
             },
           ],
         })}
@@ -280,6 +282,8 @@ describe('ConversationPane', () => {
               last_contacted: null,
               last_read_at: null,
               first_seen: null,
+              is_tracker: false,
+              tracker_name: null,
             },
           ],
         })}
@@ -375,6 +379,8 @@ describe('ConversationPane', () => {
               last_contacted: 1700000000,
               last_read_at: null,
               first_seen: 1700000000,
+              is_tracker: false,
+              tracker_name: null,
             },
           ],
         })}
@@ -412,6 +418,8 @@ describe('ConversationPane', () => {
               last_contacted: 1700000000,
               last_read_at: null,
               first_seen: 1700000000,
+              is_tracker: false,
+              tracker_name: null,
             },
           ],
         })}

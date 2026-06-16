@@ -151,6 +151,22 @@ export interface Contact {
   last_contacted: number | null;
   last_read_at: number | null;
   first_seen: number | null;
+  is_tracker: boolean;
+  tracker_name: string | null;
+}
+
+export interface LocationHistory {
+  id: number;
+  contact_public_key: string;
+  lat: number;
+  lon: number;
+  altitude: number | null;
+  speed: number | null;
+  heading: number | null;
+  satellites: number | null;
+  battery: number | null;
+  timestamp: number;
+  received_at: number;
 }
 
 export interface ContactRoute {

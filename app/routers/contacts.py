@@ -17,6 +17,7 @@ from app.models import (
     ContactTelemetryResponse,
     ContactUpsert,
     CreateContactRequest,
+    LocationHistory,
     LppSensor,
     NearestRepeater,
     PathDiscoveryResponse,
@@ -698,3 +699,42 @@ async def get_contact_telemetry_history(public_key: str) -> list[TelemetryHistor
     since = int(time.time()) - 30 * 86400
     rows = await ContactTelemetryRepository.get_history(contact.public_key, since)
     return [TelemetryHistoryEntry(**row) for row in rows]
+
+
+@router.get("/{public_key}/location-history", response_model=list[LocationHistory])
+async def get_contact_location_history(
+    public_key: str, hours: int = Query(default=12, ge=1, le=168)
+) -> list[LocationHistory]:
+    """Get location history trail for a tracker contact."""
+    from app.repository.location_history import LocationHistoryRepository
+
+    contact = await _resolve_contact_or_404(public_key)
+    since = int(time.time()) - (hours * 3600)
+    return await LocationHistoryRepository.get_history(contact.public_key, since)
+
+
+@router.get("/trackers/location-history")
+async def get_all_tracker_location_history():
+    """Get location history trails for all tracker contacts within the retention window."""
+    from app.repository.location_history import LocationHistoryRepository
+    from app.repository.settings import SettingsRepository
+
+    settings = await SettingsRepository.get()
+    retention_hours = settings.get("tracker_history_hours", 12)
+
+    # Get all location history within the retention window
+    history_by_key = await LocationHistoryRepository.get_all_recent(retention_hours)
+
+    # Get contact details for each tracker
+    result = []
+    for public_key, history in history_by_key.items():
+        contact = await ContactRepository.get_by_key(public_key)
+        if contact:
+            result.append(
+                {
+                    "contact": contact.model_dump(),
+                    "history": [h.model_dump() for h in history],
+                }
+            )
+
+    return result

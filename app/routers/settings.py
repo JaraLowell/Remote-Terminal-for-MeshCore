@@ -81,6 +81,12 @@ class AppSettingsUpdate(BaseModel):
             "path are polled every hour instead of on the normal scheduled interval."
         ),
     )
+    tracker_history_hours: int | None = Field(
+        default=None,
+        ge=1,
+        le=168,
+        description="Retention period for tracker location history in hours (1-168, default 12)",
+    )
 
 
 class BlockKeyRequest(BaseModel):

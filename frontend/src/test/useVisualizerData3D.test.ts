@@ -58,7 +58,8 @@ function createContact(publicKey: string, name: string, type = 1): Contact {
     favorite: false,
     last_contacted: null,
     last_read_at: null,
-    first_seen: null,
+    first_seen: null,is_tracker: false,
+      tracker_name: null,
   };
 }
 

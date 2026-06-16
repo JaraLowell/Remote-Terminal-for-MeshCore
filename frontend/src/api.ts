@@ -11,6 +11,7 @@ import type {
   ContactTelemetryResponse,
   FanoutConfig,
   HealthStatus,
+  LocationHistory,
   MaintenanceResult,
   Message,
   MessagesAroundResponse,
@@ -455,6 +456,13 @@ export const api = {
     }),
   contactTelemetryHistory: (publicKey: string) =>
     fetchJson<TelemetryHistoryEntry[]>(`/contacts/${publicKey}/telemetry-history`),
+  // Contact location history (tracker trails)
+  contactLocationHistory: (publicKey: string, hours = 12) =>
+    fetchJson<LocationHistory[]>(`/contacts/${publicKey}/location-history?hours=${hours}`),
+  getAllTrackerLocationHistory: () =>
+    fetchJson<Array<{ contact: Contact; history: LocationHistory[] }>>(
+      '/contacts/trackers/location-history'
+    ),
   roomLogin: (publicKey: string, password: string) =>
     fetchJson<RepeaterLoginResponse>(`/contacts/${publicKey}/room/login`, {
       method: 'POST',

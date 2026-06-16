@@ -225,6 +225,8 @@ describe('ChatHeader key visibility', () => {
       last_contacted: null,
       last_read_at: null,
       first_seen: null,
+      is_tracker: false,
+      tracker_name: null,
     };
     const conversation: Conversation = { type: 'contact', id: pubKey, name: 'Ops Board' };
 
@@ -275,6 +277,8 @@ describe('ChatHeader key visibility', () => {
       last_contacted: null,
       last_read_at: null,
       first_seen: null,
+      is_tracker: false,
+      tracker_name: null,
     };
     const conversation: Conversation = { type: 'contact', id: pubKey, name: 'Alice' };
     const onPathDiscovery = vi.fn().mockResolvedValue({
@@ -325,6 +329,8 @@ describe('ChatHeader key visibility', () => {
       last_contacted: null,
       last_read_at: null,
       first_seen: null,
+      is_tracker: false,
+      tracker_name: null,
     };
     const conversation: Conversation = { type: 'contact', id: pubKey, name: 'Alice' };
 

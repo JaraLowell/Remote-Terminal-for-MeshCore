@@ -250,7 +250,8 @@ describe('resolveContactFromHashToken', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     },
     {
       public_key: 'def456abc1237890def456abc1237890def456abc1237890def456abc1237890',
@@ -268,7 +269,8 @@ describe('resolveContactFromHashToken', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     },
     {
       public_key: 'eeeeee111111222222333333444444555555666666777777888888999999aaaa',
@@ -286,7 +288,8 @@ describe('resolveContactFromHashToken', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     },
   ];
 

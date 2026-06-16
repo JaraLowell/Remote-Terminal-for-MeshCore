@@ -61,6 +61,8 @@ function createContact(overrides: Partial<Contact> = {}): Contact {
     last_contacted: null,
     last_read_at: null,
     first_seen: 1699990000,
+    is_tracker: false,
+    tracker_name: null,
     ...overrides,
   };
 }

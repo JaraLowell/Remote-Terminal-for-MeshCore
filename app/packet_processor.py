@@ -917,6 +917,8 @@ async def _process_location(
         lat=location.lat,
         lon=location.lon,
         last_seen=timestamp,  # Server receive time
+        is_tracker=True,  # Mark as tracker
+        tracker_name=location.name,  # Store tracker name
     )
 
     # Update name if provided in location packet and contact doesn't have one
@@ -924,6 +926,21 @@ async def _process_location(
         contact_upsert.name = location.name
 
     await ContactRepository.upsert(contact_upsert)
+
+    # Store location history for trail display
+    from app.repository.location_history import LocationHistoryRepository
+
+    await LocationHistoryRepository.record(
+        contact_public_key=contact.public_key,
+        lat=location.lat,
+        lon=location.lon,
+        timestamp=location.timestamp,
+        altitude=location.altitude,
+        speed=location.speed,
+        heading=location.heading,
+        satellites=location.satellites,
+        battery=location.battery,
+    )
 
     # Read back from DB to get the full contact with all fields
     db_contact = await ContactRepository.get_by_key(contact.public_key)

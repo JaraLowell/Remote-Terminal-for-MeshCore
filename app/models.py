@@ -42,6 +42,8 @@ class ContactUpsert(BaseModel):
     on_radio: bool | None = None
     last_contacted: int | None = None
     first_seen: int | None = None
+    is_tracker: bool | None = None
+    tracker_name: str | None = None
 
     @classmethod
     def from_contact(cls, contact: Contact, **changes) -> ContactUpsert:
@@ -115,6 +117,8 @@ class Contact(BaseModel):
     last_contacted: int | None = None  # Last time we sent/received a message
     last_read_at: int | None = None  # Server-side read state tracking
     first_seen: int | None = None
+    is_tracker: bool = False  # True if this contact sends LOCATION packets
+    tracker_name: str | None = None  # Name from LOCATION packet
     effective_route: ContactRoute | None = None
     effective_route_source: Literal["override", "direct", "flood"] = "flood"
     direct_route: ContactRoute | None = None
@@ -334,6 +338,22 @@ class ContactAnalytics(BaseModel):
     nearest_repeaters: list[NearestRepeater] = Field(default_factory=list)
     hourly_activity: list[ContactAnalyticsHourlyBucket] = Field(default_factory=list)
     weekly_activity: list[ContactAnalyticsWeeklyBucket] = Field(default_factory=list)
+
+
+class LocationHistory(BaseModel):
+    """A timestamped location update from a tracker."""
+
+    id: int
+    contact_public_key: str = Field(description="Public key (64-char hex)")
+    lat: float
+    lon: float
+    altitude: int | None = None
+    speed: float | None = None
+    heading: float | None = None
+    satellites: int | None = None
+    battery: int | None = None
+    timestamp: int = Field(description="Unix timestamp from LOCATION packet")
+    received_at: int = Field(description="Server receive timestamp")
 
 
 class Channel(BaseModel):

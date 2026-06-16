@@ -61,6 +61,8 @@ describe('MapView', () => {
       last_contacted: null,
       last_read_at: null,
       first_seen: null,
+      is_tracker: false,
+      tracker_name: null,
     };
 
     render(<MapView contacts={[contact]} focusedKey={contact.public_key} />);
@@ -92,6 +94,8 @@ describe('MapView', () => {
       last_contacted: null,
       last_read_at: null,
       first_seen: null,
+      is_tracker: false,
+      tracker_name: null,
     };
     const onSelectContact = vi.fn();
 
@@ -125,6 +129,8 @@ describe('MapView', () => {
       last_contacted: null,
       last_read_at: null,
       first_seen: null,
+      is_tracker: false,
+      tracker_name: null,
     };
 
     render(<MapView contacts={[contact]} />);
@@ -158,6 +164,8 @@ describe('MapView', () => {
         last_contacted: null,
         last_read_at: null,
         first_seen: null,
+        is_tracker: false,
+        tracker_name: null,
       };
 
       const { rerender } = render(<MapView contacts={[contact]} focusedKey={null} />);
@@ -193,7 +201,8 @@ describe('MapView', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     };
     const blocked: Contact = {
       public_key: 'bb'.repeat(32),
@@ -214,7 +223,8 @@ describe('MapView', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     };
 
     render(<MapView contacts={[visible, blocked]} blockedKeys={['bb'.repeat(32)]} />);
@@ -243,7 +253,8 @@ describe('MapView', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     };
     const blocked: Contact = {
       public_key: 'cc'.repeat(32),
@@ -264,7 +275,8 @@ describe('MapView', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     };
 
     render(<MapView contacts={[visible, blocked]} blockedNames={['BadActor']} />);
@@ -293,7 +305,8 @@ describe('MapView', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     };
     const blocked: Contact = {
       public_key: 'bb'.repeat(32),
@@ -314,7 +327,8 @@ describe('MapView', () => {
       favorite: false,
       last_contacted: null,
       last_read_at: null,
-      first_seen: null,
+      first_seen: null,is_tracker: false,
+      tracker_name: null,
     };
 
     render(<MapView contacts={[visible, blocked]} blockedKeys={['bb'.repeat(32)]} />);

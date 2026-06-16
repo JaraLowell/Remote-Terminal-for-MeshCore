@@ -3,6 +3,7 @@ import {
   MapContainer,
   TileLayer,
   CircleMarker,
+  Marker,
   Popup,
   useMap,
   useMapEvents,
@@ -12,7 +13,8 @@ import {
 import type { LatLngBoundsExpression, CircleMarker as LeafletCircleMarker } from 'leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import type { Contact, RadioConfig, RawPacket } from '../types';
+import type { Contact, LocationHistory, RadioConfig, RawPacket } from '../types';
+import { api } from '../api';
 import { formatTime } from '../utils/messageParser';
 import { isValidLocation } from '../utils/pathUtils';
 import { CONTACT_TYPE_REPEATER } from '../types';
@@ -539,6 +541,34 @@ export function MapView({
   const particleIdRef = useRef(0);
   const seenObservationsRef = useRef(new Set<string>());
 
+  // Tracker location history (movement trails)
+  const [showTrails, setShowTrails] = useState(false);
+  const [trackerTrails, setTrackerTrails] = useState<Map<string, LocationHistory[]>>(new Map());
+
+  // Fetch tracker location history trails
+  useEffect(() => {
+    if (!showTrails) {
+      setTrackerTrails(new Map());
+      return;
+    }
+
+    api
+      .getAllTrackerLocationHistory()
+      .then((data) => {
+        const trails = new Map<string, LocationHistory[]>();
+        data.forEach(({ contact, history }) => {
+          if (history.length > 1) {
+            // Only include trails with 2+ points
+            trails.set(contact.public_key, history);
+          }
+        });
+        setTrackerTrails(trails);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch tracker location history:', err);
+      });
+  }, [showTrails]);
+
   // Build prefix index and name index for hop resolution
   const { prefixIndex, nameIndex } = useMemo(() => {
     const prefix = new Map<string, Contact[]>();
@@ -927,6 +957,15 @@ export function MapView({
               <span className="text-[0.6875rem]">Discover nodes</span>
             </label>
           )}
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showTrails}
+              onChange={(e) => setShowTrails(e.target.checked)}
+              className="rounded border-border"
+            />
+            <span className="text-[0.6875rem]">Tracker trails</span>
+          </label>
         </div>
       </div>
 
@@ -974,8 +1013,25 @@ export function MapView({
               />
             ))}
 
+          {/* Tracker movement trails (red polylines) */}
+          {showTrails &&
+            Array.from(trackerTrails.entries()).map(([publicKey, history]) => (
+              <Polyline
+                key={`trail-${publicKey}`}
+                positions={history.map((h) => [h.lat, h.lon] as [number, number])}
+                pathOptions={{
+                  color: '#ef4444',
+                  weight: 3,
+                  opacity: 0.7,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+            ))}
+
           {mappableContacts.map((contact) => {
             const isRepeater = contact.type === CONTACT_TYPE_REPEATER;
+            const isTracker = contact.is_tracker;
             const color = getMarkerColor(contact.last_seen);
             const displayName = contact.name || contact.public_key.slice(0, 12);
             const lastHeardLabel =
@@ -984,51 +1040,81 @@ export function MapView({
                 : 'Never heard by this server';
             const radius = isRepeater ? 10 : 7;
 
+            // Custom icon for trackers
+            const trackerIcon = isTracker
+              ? L.divIcon({
+                  html: '<div style="font-size: 24px; line-height: 1; text-align: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">🚗</div>',
+                  className: 'tracker-marker',
+                  iconSize: [32, 32],
+                  iconAnchor: [16, 16],
+                  popupAnchor: [0, -16],
+                })
+              : undefined;
+
+            const markerContent = (
+              <Popup>
+                <div className="text-sm">
+                  <div className="font-medium flex items-center gap-1">
+                    {isRepeater && (
+                      <span title="Repeater" aria-hidden="true">
+                        🛜
+                      </span>
+                    )}
+                    {isTracker && (
+                      <span title="Tracker" aria-hidden="true">
+                        🚗
+                      </span>
+                    )}
+                    {onSelectContact ? (
+                      <button
+                        type="button"
+                        className="p-0 bg-transparent border-0 font-inherit text-primary underline hover:text-primary/80 cursor-pointer"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSelectContact(contact);
+                        }}
+                        title={`Open conversation with ${displayName}`}
+                      >
+                        {displayName}
+                      </button>
+                    ) : (
+                      displayName
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">Last heard: {lastHeardLabel}</div>
+                  <div className="text-xs text-gray-400 mt-1 font-mono">
+                    {contact.lat!.toFixed(5)}, {contact.lon!.toFixed(5)}
+                  </div>
+                </div>
+              </Popup>
+            );
+
             return (
               <Fragment key={contact.public_key}>
-                <CircleMarker
-                  key={contact.public_key}
-                  ref={(ref) => setMarkerRef(contact.public_key, ref)}
-                  center={[contact.lat!, contact.lon!]}
-                  radius={radius}
-                  pathOptions={{
-                    color: isRepeater ? MAP_REPEATER_RING : MAP_MARKER_STROKE,
-                    fillColor: color,
-                    fillOpacity: 0.9,
-                    weight: isRepeater ? 3 : 2,
-                  }}
-                >
-                  <Popup>
-                    <div className="text-sm">
-                      <div className="font-medium flex items-center gap-1">
-                        {isRepeater && (
-                          <span title="Repeater" aria-hidden="true">
-                            🛜
-                          </span>
-                        )}
-                        {onSelectContact ? (
-                          <button
-                            type="button"
-                            className="p-0 bg-transparent border-0 font-inherit text-primary underline hover:text-primary/80 cursor-pointer"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onSelectContact(contact);
-                            }}
-                            title={`Open conversation with ${displayName}`}
-                          >
-                            {displayName}
-                          </button>
-                        ) : (
-                          displayName
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">Last heard: {lastHeardLabel}</div>
-                      <div className="text-xs text-gray-400 mt-1 font-mono">
-                        {contact.lat!.toFixed(5)}, {contact.lon!.toFixed(5)}
-                      </div>
-                    </div>
-                  </Popup>
-                </CircleMarker>
+                {isTracker ? (
+                  <Marker
+                    key={contact.public_key}
+                    position={[contact.lat!, contact.lon!]}
+                    icon={trackerIcon!}
+                  >
+                    {markerContent}
+                  </Marker>
+                ) : (
+                  <CircleMarker
+                    key={contact.public_key}
+                    ref={(ref) => setMarkerRef(contact.public_key, ref)}
+                    center={[contact.lat!, contact.lon!]}
+                    radius={radius}
+                    pathOptions={{
+                      color: isRepeater ? MAP_REPEATER_RING : MAP_MARKER_STROKE,
+                      fillColor: color,
+                      fillOpacity: 0.9,
+                      weight: isRepeater ? 3 : 2,
+                    }}
+                  >
+                    {markerContent}
+                  </CircleMarker>
+                )}
               </Fragment>
             );
           })}
