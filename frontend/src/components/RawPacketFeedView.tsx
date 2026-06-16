@@ -61,11 +61,25 @@ function getPacketTypeName(
 ): string {
   try {
     const decoded = MeshCoreDecoder.decode(packet.data, decoderOptions);
-    if (!decoded.isValid) return 'Unknown';
+    if (!decoded.isValid) {
+      // Fall back to backend payload_type if decoder fails
+      return packet.payload_type && KNOWN_PAYLOAD_TYPE_SET.has(packet.payload_type)
+        ? packet.payload_type
+        : 'Unknown';
+    }
     const name = Utils.getPayloadTypeName(decoded.payloadType);
-    return KNOWN_PAYLOAD_TYPE_SET.has(name) ? name : 'Unknown';
+    // If decoder doesn't know the type, try backend payload_type
+    if (!KNOWN_PAYLOAD_TYPE_SET.has(name)) {
+      return packet.payload_type && KNOWN_PAYLOAD_TYPE_SET.has(packet.payload_type)
+        ? packet.payload_type
+        : 'Unknown';
+    }
+    return name;
   } catch {
-    return 'Unknown';
+    // Fall back to backend payload_type on decode error
+    return packet.payload_type && KNOWN_PAYLOAD_TYPE_SET.has(packet.payload_type)
+      ? packet.payload_type
+      : 'Unknown';
   }
 }
 

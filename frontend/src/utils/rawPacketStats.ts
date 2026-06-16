@@ -25,6 +25,8 @@ export const KNOWN_PAYLOAD_TYPES = [
   'Trace',
   'Path',
   'Control',
+  'Atlas',
+  'Location',
   'Unknown',
 ] as const;
 

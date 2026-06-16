@@ -283,7 +283,16 @@ export function decodePacketSummary(
         break;
       }
       default:
-        summary = `${payloadTypeName}${pathStr}`;
+        // Handle unknown types that may be defined server-side (e.g., LOCATION = 0x0D)
+        // Use backend payload_type name if available, or fall back to library name
+        const backendPayloadType = packet.payload_type;
+        if (backendPayloadType === 'LOCATION' && packet.decrypted_info?.sender) {
+          summary = `Location from ${packet.decrypted_info.sender}${pathStr}`;
+        } else if (backendPayloadType === 'ATLAS') {
+          summary = `Atlas${pathStr}`;
+        } else {
+          summary = `${payloadTypeName}${pathStr}`;
+        }
         break;
     }
 
