@@ -26,6 +26,7 @@ from app.decoder import (
     PayloadType,
     derive_public_key,
     parse_advertisement,
+    parse_location,
     parse_packet,
     try_decrypt_dm,
     try_decrypt_packet_with_channel_key,
@@ -544,6 +545,14 @@ async def process_raw_packet(
     elif payload_type == PayloadType.PATH:
         await _process_path_packet(raw_bytes, ts, packet_info)
 
+    elif payload_type == PayloadType.LOCATION:
+        # Process LOCATION tracker packets - update contact location and broadcast
+        location_result = await _process_location(
+            raw_bytes, ts, packet_info, transport_codes=transport_codes, region_name=region_name
+        )
+        if location_result:
+            result.update(location_result)
+
     # Always broadcast raw packet for the packet feed UI (even duplicates)
     # This enables the frontend cracker to see all incoming packets in real-time
     broadcast_payload = RawPacketBroadcast(
@@ -786,6 +795,175 @@ async def _process_advertisement(
         settings = await AppSettingsRepository.get()
         if settings.auto_decrypt_dm_on_advert:
             await start_historical_dm_decryption(None, advert.public_key.lower(), advert.name)
+
+
+async def _process_location(
+    raw_bytes: bytes,
+    timestamp: int,
+    packet_info: PacketInfo | None = None,
+    transport_codes: bytes | None = None,
+    region_name: str | None = None,
+) -> dict | None:
+    """
+    Process a LOCATION tracker packet (0x0D).
+
+    Extracts tracker location info and updates the contact database.
+    LOCATION packets are flood-routed with a 2-hop limit.
+    Returns decoded location info for display in the raw packet feed.
+    """
+    # Parse packet to get path info if not already provided
+    if packet_info is None:
+        packet_info = parse_packet(raw_bytes)
+    if packet_info is None:
+        logger.debug("Failed to parse LOCATION packet")
+        return None
+
+    location = parse_location(packet_info.payload)
+    if not location:
+        logger.debug("Failed to parse LOCATION payload")
+        return None
+
+    new_path_len = packet_info.path_length
+    new_path_hex = packet_info.path.hex() if packet_info.path else ""
+
+    # Update last_seen for contacts found in the packet path (intermediate hops)
+    if packet_info.path:
+        await _update_last_seen_for_path_hops(
+            new_path_hex,
+            new_path_len,
+            packet_info.path_hash_size,
+            timestamp,
+        )
+
+    # Log location details including transport codes and region if present
+    transport_info = ""
+    if transport_codes:
+        transport_info = f" transport_codes={transport_codes.hex()}"
+        if region_name:
+            transport_info += f" region={region_name}"
+
+    logger.debug(
+        "Parsed LOCATION from node_id=%s: %s (lat=%.6f, lon=%.6f, alt=%dm, "
+        "speed=%.1fm/s, hdg=%.1f°, sats=%d, batt=%dmV, path_len=%d%s)",
+        location.node_id,
+        location.name or "(no name)",
+        location.lat,
+        location.lon,
+        location.altitude,
+        location.speed,
+        location.heading,
+        location.satellites,
+        location.battery,
+        new_path_len,
+        transport_info,
+    )
+
+    # Try to match the node_id (first 4 bytes of public key) to an existing contact
+    # node_id is 8 hex chars, so we search for contacts whose public key starts with it
+    matching_contacts = await ContactRepository.get_all()
+    contact = None
+    for c in matching_contacts:
+        if c.public_key.lower().startswith(location.node_id.lower()):
+            contact = c
+            break
+
+    # If no match found by node_id, skip creating a new contact - we need the full
+    # public key for proper contact storage. Users should see the advertisement first.
+    if contact is None:
+        logger.debug(
+            "No contact found for LOCATION node_id=%s, skipping (wait for advertisement)",
+            location.node_id,
+        )
+        # Still broadcast the raw location data as a "location" event for display purposes
+        broadcast_event(
+            "location",
+            {
+                "node_id": location.node_id,
+                "name": location.name,
+                "lat": location.lat,
+                "lon": location.lon,
+                "altitude": location.altitude,
+                "speed": location.speed,
+                "heading": location.heading,
+                "satellites": location.satellites,
+                "battery": location.battery,
+                "timestamp": location.timestamp,
+                "path_len": new_path_len,
+                "path": new_path_hex,
+                "region_name": region_name,
+            },
+        )
+        # Return decoded info for raw packet feed display
+        display_name = location.name or f"Node {location.node_id[:8]}"
+        message = (
+            f"📍 {display_name}: {location.lat:.6f}, {location.lon:.6f} "
+            f"(alt: {location.altitude}m, speed: {location.speed:.1f}m/s, "
+            f"hdg: {location.heading:.1f}°, sats: {location.satellites}, "
+            f"batt: {location.battery}mV)"
+        )
+        return {
+            "decrypted": True,
+            "sender": display_name,
+            "message": message,
+            "sender_timestamp": location.timestamp,
+        }
+
+    # Update the existing contact with location and tracker data
+    # Use the location packet timestamp for last_seen, and preserve the contact's
+    # last_advert time (which comes from advertisements, not location packets)
+    contact_upsert = ContactUpsert(
+        public_key=contact.public_key,
+        lat=location.lat,
+        lon=location.lon,
+        last_seen=timestamp,  # Server receive time
+    )
+
+    # Update name if provided in location packet and contact doesn't have one
+    if location.name and not contact.name:
+        contact_upsert.name = location.name
+
+    await ContactRepository.upsert(contact_upsert)
+
+    # Read back from DB to get the full contact with all fields
+    db_contact = await ContactRepository.get_by_key(contact.public_key)
+    if db_contact:
+        # Broadcast both the updated contact and a detailed location event
+        broadcast_event("contact", db_contact.model_dump())
+        broadcast_event(
+            "location",
+            {
+                "public_key": contact.public_key,
+                "node_id": location.node_id,
+                "name": location.name or db_contact.name,
+                "lat": location.lat,
+                "lon": location.lon,
+                "altitude": location.altitude,
+                "speed": location.speed,
+                "heading": location.heading,
+                "satellites": location.satellites,
+                "battery": location.battery,
+                "timestamp": location.timestamp,
+                "path_len": new_path_len,
+                "path": new_path_hex,
+                "region_name": region_name,
+            },
+        )
+
+    # Return decoded info for raw packet feed display
+    display_name = location.name or db_contact.name if db_contact else f"Node {location.node_id[:8]}"
+    message = (
+        f"📍 {display_name}: {location.lat:.6f}, {location.lon:.6f} "
+        f"(alt: {location.altitude}m, speed: {location.speed:.1f}m/s, "
+        f"hdg: {location.heading:.1f}°, sats: {location.satellites}, "
+        f"batt: {location.battery}mV)"
+    )
+    return {
+        "decrypted": True,
+        "sender": display_name,
+        "message": message,
+        "sender_timestamp": location.timestamp,
+        "contact_key": contact.public_key if contact else None,
+    }
 
 
 async def _process_direct_message(

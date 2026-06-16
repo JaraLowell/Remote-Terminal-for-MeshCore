@@ -28,6 +28,8 @@ class PayloadType(IntEnum):
     TRACE = 0x09
     MULTIPART = 0x0A
     CONTROL = 0x0B
+    ATLAS = 0x0C
+    LOCATION = 0x0D
     RAW_CUSTOM = 0x0F
 
 
@@ -92,6 +94,25 @@ class ParsedAdvertisement:
     lat: float | None
     lon: float | None
     device_role: int  # 1=Chat, 2=Repeater, 3=Room, 4=Sensor
+
+
+@dataclass
+class ParsedLocation:
+    """Result of parsing a LOCATION tracker packet (0x0D)."""
+
+    magic: str  # Should be "MCL1"
+    version: int
+    flags: int
+    node_id: str  # 8-char hex (first 4 bytes of sender identity)
+    lat: float  # Decimal degrees
+    lon: float  # Decimal degrees
+    altitude: int  # Metres
+    speed: float  # Metres per second
+    heading: float  # Degrees
+    satellites: int
+    battery: int  # Millivolts
+    timestamp: int  # Unix timestamp
+    name: str | None  # Node name from packet
 
 
 @dataclass
@@ -374,6 +395,107 @@ def parse_advertisement(
         lat=lat,
         lon=lon,
         device_role=device_role,
+    )
+
+
+def parse_location(payload: bytes) -> ParsedLocation | None:
+    """
+    Parse a LOCATION tracker payload (0x0D).
+
+    Payload structure:
+    - Bytes 0-3: magic ("MCL1")
+    - Byte 4: version (currently 1)
+    - Byte 5: flags (reserved)
+    - Bytes 6-9: node_id (first 4 bytes of sender identity)
+    - Bytes 10-13: lat (signed int32 LE, microdegrees)
+    - Bytes 14-17: lon (signed int32 LE, microdegrees)
+    - Bytes 18-19: altitude (signed int16 LE, metres)
+    - Bytes 20-21: speed (uint16 LE, cm/s)
+    - Bytes 22-23: heading (uint16 LE, centidegrees)
+    - Byte 24: satellites
+    - Bytes 25-26: battery (uint16 LE, millivolts)
+    - Bytes 27-30: timestamp (uint32 LE, Unix time)
+    - Byte 31: name_len (0-24)
+    - Bytes 32+: name (UTF-8, up to 24 bytes)
+    """
+    # Minimum size: all fixed fields = 32 bytes
+    if len(payload) < 32:
+        return None
+
+    # Parse magic and verify
+    magic = payload[0:4].decode("ascii", errors="ignore")
+    if magic != "MCL1":
+        logger.debug("Invalid LOCATION magic: %s", magic)
+        return None
+
+    version = payload[4]
+    flags = payload[5]
+    node_id = payload[6:10].hex()
+
+    # Parse coordinates (signed int32, microdegrees)
+    lat_micro = int.from_bytes(payload[10:14], "little", signed=True)
+    lon_micro = int.from_bytes(payload[14:18], "little", signed=True)
+    lat = lat_micro / 1_000_000.0
+    lon = lon_micro / 1_000_000.0
+
+    # Validate coordinates
+    if not _is_valid_advert_location(lat, lon):
+        logger.debug(
+            "Invalid LOCATION coordinates: lat=%f, lon=%f",
+            lat,
+            lon,
+        )
+        return None
+
+    # Parse altitude (signed int16, metres)
+    altitude = int.from_bytes(payload[18:20], "little", signed=True)
+
+    # Parse speed (uint16, cm/s) and convert to m/s
+    speed_cm = int.from_bytes(payload[20:22], "little", signed=False)
+    speed = speed_cm / 100.0
+
+    # Parse heading (uint16, centidegrees) and convert to degrees
+    heading_centi = int.from_bytes(payload[22:24], "little", signed=False)
+    heading = heading_centi / 100.0
+
+    satellites = payload[24]
+
+    # Parse battery (uint16, millivolts)
+    battery = int.from_bytes(payload[25:27], "little", signed=False)
+
+    # Parse timestamp (uint32, Unix time)
+    timestamp = int.from_bytes(payload[27:31], "little", signed=False)
+
+    # Parse name
+    name_len = payload[31]
+    name = None
+    if name_len > 0:
+        if len(payload) < 32 + name_len:
+            logger.debug("LOCATION name_len=%d but payload too short", name_len)
+            return None
+        if name_len > 24:
+            logger.debug("LOCATION name_len=%d exceeds maximum 24", name_len)
+            return None
+        try:
+            name = payload[32 : 32 + name_len].decode("utf-8")
+        except UnicodeDecodeError:
+            logger.debug("LOCATION name failed UTF-8 decode")
+            # Continue without name
+
+    return ParsedLocation(
+        magic=magic,
+        version=version,
+        flags=flags,
+        node_id=node_id,
+        lat=lat,
+        lon=lon,
+        altitude=altitude,
+        speed=speed,
+        heading=heading,
+        satellites=satellites,
+        battery=battery,
+        timestamp=timestamp,
+        name=name,
     )
 
 
