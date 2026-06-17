@@ -398,7 +398,7 @@ export function buildMapPacketFeedEntry(
   context: MapPacketFeedContext
 ): MapPacketFeedEntry {
   const decoded = decodePacket(packet, context.decoderOptions);
-  const typeLabel = payloadTypeLabel(packet, decoded).padEnd(9, ' ');
+  const typeLabel = payloadTypeLabel(packet, decoded);
   const typeColor = payloadTypeColor(packet, decoded);
   const hopsPrefix = formatMapPacketHops(decoded ? getDecodedPathTokens(decoded) : []);
   const senderLabel = decoded
