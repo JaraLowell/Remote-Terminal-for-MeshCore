@@ -25,8 +25,6 @@ from app.services.spam_path_analysis import (
 
 logger = logging.getLogger(__name__)
 
-_MAX_REPORT_CLUSTERS = 3
-
 # Default GWNL / community MQTT bridge gateways (full public keys, lowercase).
 _DEFAULT_GATEWAY_PUBKEYS: tuple[str, ...] = (
     "1228d131fa4b13c78a7aefee124e5c7fe51a8555115220d64d1df749b5a7de8c",
@@ -96,6 +94,7 @@ class SpamLiveTracker:
     _episode_started_at: int | None = field(default=None, init=False)
     _episode_last_clusters: list[SpamFloodCluster] = field(default_factory=list, init=False)
     _episode_packet_records: list[_PacketRecord] = field(default_factory=list, init=False)
+    _episode_peak_clusters: dict[str, SpamFloodCluster] = field(default_factory=dict, init=False)
 
     def reload_gateway_pubkeys(self) -> None:
         self._gateway_pubkeys = _effective_gateway_pubkeys()
@@ -201,6 +200,86 @@ class SpamLiveTracker:
     def _min_cluster_size(self) -> int:
         return max(1, int(self.packet_threshold * self.cluster_min_ratio))
 
+    def _max_report_clusters(self) -> int | None:
+        limit = settings.spam_live_max_report_clusters
+        if limit <= 0:
+            return None
+        return limit
+
+    def _apply_report_limit(self, clusters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        limit = self._max_report_clusters()
+        if limit is None:
+            return clusters
+        return clusters[:limit]
+
+    def _apply_report_limit_models(self, clusters: list[SpamFloodCluster]) -> list[SpamFloodCluster]:
+        limit = self._max_report_clusters()
+        if limit is None:
+            return clusters
+        return clusters[:limit]
+
+    @staticmethod
+    def _cluster_identity_key(cluster: SpamFloodCluster) -> str:
+        refined = cluster.refined_hop_tokens or cluster.hop_tokens
+        suffix = "/".join(refined) if refined else cluster.entry_hop
+        return f"{cluster.entry_hop}:{suffix}"
+
+    def _update_episode_peak_clusters(self, clusters: list[SpamFloodCluster]) -> None:
+        for cluster in clusters:
+            key = self._cluster_identity_key(cluster)
+            existing = self._episode_peak_clusters.get(key)
+            if existing is None:
+                self._episode_peak_clusters[key] = cluster
+                continue
+            self._episode_peak_clusters[key] = existing.model_copy(
+                update={
+                    "packet_count": max(existing.packet_count, cluster.packet_count),
+                    "traffic_share": max(existing.traffic_share, cluster.traffic_share),
+                    "confidence": max(existing.confidence, cluster.confidence),
+                    "last_seen": max(existing.last_seen, cluster.last_seen),
+                    "entry_name": cluster.entry_name or existing.entry_name,
+                    "entry_public_key": cluster.entry_public_key or existing.entry_public_key,
+                    "lat": cluster.lat if cluster.lat is not None else existing.lat,
+                    "lon": cluster.lon if cluster.lon is not None else existing.lon,
+                    "origin_hop": cluster.origin_hop or existing.origin_hop,
+                    "origin_name": cluster.origin_name or existing.origin_name,
+                    "origin_public_key": cluster.origin_public_key or existing.origin_public_key,
+                    "origin_lat": cluster.origin_lat if cluster.origin_lat is not None else existing.origin_lat,
+                    "origin_lon": cluster.origin_lon if cluster.origin_lon is not None else existing.origin_lon,
+                    "dominant_route": cluster.dominant_route or existing.dominant_route,
+                    "hop_tokens": cluster.hop_tokens or existing.hop_tokens,
+                    "refined_route": cluster.refined_route or existing.refined_route,
+                    "refined_hop_tokens": cluster.refined_hop_tokens or existing.refined_hop_tokens,
+                    "narrowing_depth": max(existing.narrowing_depth, cluster.narrowing_depth),
+                    "concentration": max(existing.concentration, cluster.concentration),
+                    "cluster_mode": cluster.cluster_mode or existing.cluster_mode,
+                }
+            )
+
+    def _episode_peak_clusters_display(self) -> list[SpamFloodCluster]:
+        clusters = self._sorted_peak_clusters()
+        return self._apply_report_limit_models(clusters)
+
+    def _all_episode_peak_clusters(self) -> list[SpamFloodCluster]:
+        return self._sorted_peak_clusters()
+
+    def _sorted_peak_clusters(self) -> list[SpamFloodCluster]:
+        clusters = list(self._episode_peak_clusters.values())
+        clusters.sort(
+            key=lambda cluster: (
+                -cluster.packet_count,
+                -cluster.traffic_share,
+                -cluster.last_seen,
+                cluster.entry_hop,
+            )
+        )
+        return clusters
+
+    def _clustering_records(self) -> list[_PacketRecord]:
+        if self._episode_packet_records:
+            return list(self._episode_packet_records)
+        return list(self._history)
+
     def _build_cluster_results(
         self,
         narrowed_clusters: list[tuple[Any, list[_PacketRecord]]],
@@ -233,7 +312,7 @@ class SpamLiveTracker:
                 item["entry_hop"],
             )
         )
-        return results[:_MAX_REPORT_CLUSTERS]
+        return self._apply_report_limit(results)
 
     def _cluster_packets_narrowed_from(self, records: list[_PacketRecord]) -> list[dict[str, Any]]:
         min_cluster_size = self._min_cluster_size()
@@ -247,17 +326,18 @@ class SpamLiveTracker:
 
     def _cluster_packets_partitioned_from(self, records: list[_PacketRecord]) -> list[dict[str, Any]]:
         min_cluster_size = self._min_cluster_size()
+        max_clusters = self._max_report_clusters() or len(records)
         partitioned_clusters = split_entry_partitioned_clusters(
             records,
             min_cluster_size=min_cluster_size,
             min_share=self.cluster_min_ratio,
             get_path=lambda record: record.full_rf_path,
-            max_clusters=_MAX_REPORT_CLUSTERS,
+            max_clusters=max_clusters,
         )
         return self._build_cluster_results(partitioned_clusters, cluster_mode="partitioned")
 
     def _cluster_packets_narrowed(self) -> list[dict[str, Any]]:
-        return self._cluster_packets_narrowed_from(list(self._history))
+        return self._cluster_packets_narrowed_from(self._clustering_records())
 
     def _fallback_entry_clusters_from(self, records: list[_PacketRecord]) -> list[dict[str, Any]]:
         """Best-effort ingress hops when traffic is high but too dispersed to narrow."""
@@ -289,12 +369,10 @@ class SpamLiveTracker:
                     "cluster_mode": "entry_fallback",
                 }
             )
-            if len(results) >= _MAX_REPORT_CLUSTERS:
-                break
-        return results
+        return self._apply_report_limit(results)
 
     def _fallback_entry_clusters(self) -> list[dict[str, Any]]:
-        return self._fallback_entry_clusters_from(list(self._history))
+        return self._fallback_entry_clusters_from(self._clustering_records())
 
     def _cluster_packets_from(self, records: list[_PacketRecord]) -> list[dict[str, Any]]:
         narrowed = self._cluster_packets_narrowed_from(records)
@@ -306,7 +384,7 @@ class SpamLiveTracker:
         return self._fallback_entry_clusters_from(records)
 
     def _cluster_packets(self) -> list[dict[str, Any]]:
-        return self._cluster_packets_from(list(self._history))
+        return self._cluster_packets_from(self._clustering_records())
 
     async def get_live_status(self) -> SpamLiveStatus:
         current_time = time.time()
@@ -314,7 +392,7 @@ class SpamLiveTracker:
         self._sync_active_state(current_time)
         if was_active and not self._active:
             await self._end_episode(current_time)
-        clusters = self._cluster_packets() if self._active and self._history else []
+        clusters = self._cluster_packets() if self._active and self._clustering_records() else []
         status = await self._build_status_async(current_time, clusters)
         self._last_status = status
         return status
@@ -365,14 +443,19 @@ class SpamLiveTracker:
     ) -> SpamLiveStatus:
         enriched_clusters = await self._enrich_clusters(clusters)
         clusters_stale = False
-        if not enriched_clusters and self._active and self._episode_last_clusters:
+        if enriched_clusters:
+            self._update_episode_peak_clusters(enriched_clusters)
+            self._episode_last_clusters = list(enriched_clusters)
+            enriched_clusters = self._episode_peak_clusters_display()
+        elif self._active and self._episode_peak_clusters:
+            enriched_clusters = self._episode_peak_clusters_display()
+            clusters_stale = True
+        elif self._active and self._episode_last_clusters:
             enriched_clusters = [
                 cluster.model_copy(update={"cluster_mode": cluster.cluster_mode or "sticky"})
                 for cluster in self._episode_last_clusters
             ]
             clusters_stale = True
-        elif enriched_clusters:
-            self._episode_last_clusters = enriched_clusters
         peak_window = self._trigger_window_count(current_time)
         if self._episode_db_id is not None:
             self._episode_peak_window = max(self._episode_peak_window, peak_window)
@@ -389,7 +472,7 @@ class SpamLiveTracker:
             window_secs=int(self.window_secs),
             packet_threshold=self.packet_threshold,
             total_packets=peak_window,
-            episode_packets=len(self._history),
+            episode_packets=len(self._episode_packet_records) or len(self._history),
             episode_window_secs=int(self._episode_retention_horizon()),
             detected_at=int(self._detected_at) if self._detected_at is not None else None,
             baseline_packets_per_window=(
@@ -446,6 +529,7 @@ class SpamLiveTracker:
         self._episode_total_packets = 1
         self._episode_peak_window = self._trigger_window_count(current_time)
         self._episode_last_clusters = []
+        self._episode_peak_clusters = {}
 
     def _schedule_episode_progress(self) -> None:
         if self._episode_db_id is None:
@@ -457,7 +541,9 @@ class SpamLiveTracker:
             return
         cluster_raw = self._cluster_packets_from(self._episode_packet_records)
         if cluster_raw:
-            self._episode_last_clusters = await self._enrich_clusters(cluster_raw)
+            enriched = await self._enrich_clusters(cluster_raw)
+            self._update_episode_peak_clusters(enriched)
+            self._episode_last_clusters = self._all_episode_peak_clusters()
         try:
             await SpamFloodEpisodeRepository.update_progress(
                 episode_id=self._episode_db_id,
@@ -476,8 +562,12 @@ class SpamLiveTracker:
         cluster_raw = self._cluster_packets_from(self._episode_packet_records)
         if cluster_raw:
             final_clusters = await self._enrich_clusters(cluster_raw)
+            self._update_episode_peak_clusters(final_clusters)
+            final_clusters = self._all_episode_peak_clusters()
+        elif self._episode_peak_clusters:
+            final_clusters = self._all_episode_peak_clusters()
         elif self._episode_last_clusters:
-            final_clusters = self._episode_last_clusters[:_MAX_REPORT_CLUSTERS]
+            final_clusters = self._apply_report_limit_models(self._episode_last_clusters)
         else:
             final_clusters = []
         try:
@@ -500,6 +590,7 @@ class SpamLiveTracker:
             self._episode_started_at = None
             self._episode_last_clusters = []
             self._episode_packet_records = []
+            self._episode_peak_clusters = {}
 
     async def observe_and_maybe_alert(
         self,

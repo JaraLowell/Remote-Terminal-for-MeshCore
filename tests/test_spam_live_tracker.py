@@ -91,10 +91,9 @@ async def test_spam_live_tracker_falls_back_to_entry_hop_when_paths_are_disperse
     assert narrowed == []
 
     clusters = tracker._cluster_packets()
-    assert len(clusters) == 3
+    assert len(clusters) == 5
     assert all(cluster["cluster_mode"] == "partitioned" for cluster in clusters)
     assert all(cluster["narrowing_depth"] >= 2 for cluster in clusters)
-    assert clusters[0]["packet_count"] == 3
 
 
 @pytest.mark.asyncio
@@ -120,6 +119,39 @@ async def test_spam_live_tracker_clusters_multiple_ingress_points(test_db):
     assert len(status.clusters) == 2
     entry_hops = {cluster.entry_hop for cluster in status.clusters}
     assert entry_hops == {"AA", "BB"}
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_preserves_peak_share_after_source_stops_during_hold():
+    tracker = _make_tracker(packet_threshold=3, hold_secs=300, cluster_min_ratio=0.15, gateway_pubkeys=frozenset())
+    base = 1_700_000_000.0
+
+    for offset in range(3):
+        await tracker.observe_and_maybe_alert(
+            path_hex="AABB",
+            path_len=2,
+            observed_at=base + offset,
+        )
+
+    status_after_aa = await tracker.get_live_status()
+    assert status_after_aa.active
+    aa_cluster = next(cluster for cluster in status_after_aa.clusters if cluster.entry_hop == "AA")
+    peak_aa_share = aa_cluster.traffic_share
+    assert peak_aa_share == pytest.approx(1.0)
+
+    for offset in range(10):
+        await tracker.observe_and_maybe_alert(
+            path_hex="BBCC",
+            path_len=2,
+            observed_at=base + 40 + offset,
+        )
+
+    status_during_hold = await tracker.get_live_status()
+    assert status_during_hold.active
+    aa_clusters = [cluster for cluster in status_during_hold.clusters if cluster.entry_hop == "AA"]
+    assert len(aa_clusters) == 1
+    assert aa_clusters[0].traffic_share >= peak_aa_share
+    assert aa_clusters[0].packet_count == 3
 
 
 @pytest.mark.asyncio

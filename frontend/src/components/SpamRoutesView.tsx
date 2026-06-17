@@ -95,7 +95,7 @@ function formatClusterHotspotLabel(cluster: SpamFloodCluster): string {
 
 function episodeReportClusters(episode: SpamFloodEpisode): SpamFloodCluster[] {
   if (episode.clusters.length > 0) {
-    return episode.clusters.slice(0, 3);
+    return episode.clusters;
   }
   const hop = episode.primary_origin_hop ?? episode.primary_entry_hop;
   if (!hop) return [];
@@ -550,8 +550,9 @@ function LiveFloodSection({ live }: { live: SpamLiveStatus | null }) {
         <div className="space-y-2">
           {live.clusters_stale && (
             <p className="text-xs text-destructive/90">
-              Showing last known hotspot snapshot while current paths are too dispersed to match a
-              narrowed cluster.
+              Showing peak hotspot snapshot while current paths are too dispersed for a fresh match.
+              Traffic shares stay at each candidate&apos;s episode high-water mark until the hold
+              window closes.
             </p>
           )}
           {live.clusters.some((cluster) => cluster.cluster_mode === 'entry_fallback') && (
@@ -569,7 +570,7 @@ function LiveFloodSection({ live }: { live: SpamLiveStatus | null }) {
                 because no single prefix dominated the whole episode.
               </p>
             )}
-          <div className="grid gap-2 lg:grid-cols-2">
+          <div className="grid gap-2 lg:grid-cols-2 xl:grid-cols-3 max-h-[32rem] overflow-y-auto pr-1">
             {live.clusters.map((cluster, index) => (
               <LiveHotspotCard key={`${cluster.entry_hop}-${index}`} cluster={cluster} index={index} />
             ))}
@@ -760,8 +761,9 @@ function FloodEpisodeLogSection({
       <div>
         <h3 className="text-sm font-semibold">Flood Alert History</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Persisted attack log with 14-day baseline context. Each ended episode keeps up to three
-          top hotspot candidates when multiple ingress paths were active. Stuck in-progress rows usually
+          Persisted attack log with 14-day baseline context. Each ended episode keeps all
+          qualifying hotspot candidates (one source or many). Peak traffic shares are retained
+          during the post-flood hold even if a source stops early. Stuck in-progress rows usually
           mean the server restarted mid-attack — delete them or restart once more to auto-close leftovers.
         </p>
       </div>

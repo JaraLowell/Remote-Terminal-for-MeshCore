@@ -57,6 +57,15 @@ class Settings(BaseSettings):
             "0 means match hold_secs (recommended)."
         ),
     )
+    spam_live_max_report_clusters: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+        description=(
+            "Maximum hotspot candidates to surface in live UI and persisted episode reports. "
+            "0 means no limit (all qualifying ingress clusters)."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_transport_exclusivity(self) -> "Settings":
