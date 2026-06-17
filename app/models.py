@@ -621,7 +621,7 @@ class SpamFloodCluster(BaseModel):
     last_seen: int = Field(description="Unix timestamp of the newest packet in this cluster")
     cluster_mode: str | None = Field(
         default=None,
-        description="narrowed, entry_fallback, or sticky when cluster confidence is degraded",
+        description="narrowed, partitioned, entry_fallback, or sticky when cluster confidence is degraded",
     )
 
 

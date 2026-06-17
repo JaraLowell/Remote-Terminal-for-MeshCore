@@ -76,6 +76,7 @@ async def delete_spam_flood_episode(episode_id: int) -> dict[str, str]:
         spam_live_tracker._episode_baseline = None
         spam_live_tracker._episode_started_at = None
         spam_live_tracker._episode_last_clusters = []
+        spam_live_tracker._episode_packet_records = []
     return {"status": "ok"}
 
 

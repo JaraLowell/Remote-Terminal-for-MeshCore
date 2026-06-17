@@ -10,6 +10,7 @@ from app.services.spam_path_analysis import (
     estimate_origin_geo,
     hop_suspect_score,
     narrow_dominant_prefix,
+    split_entry_partitioned_clusters,
     split_path_clusters,
 )
 
@@ -55,6 +56,33 @@ def test_split_path_clusters_peels_multiple_hotspots():
     assert first_prefix[0] in {"AA", "XX"}
     assert second_prefix[0] in {"AA", "XX"}
     assert first_prefix != second_prefix
+
+
+def test_split_entry_partitioned_clusters_handles_multi_source_floods():
+    records = [
+        _PathRecord(("AA", "11", "00")),
+        _PathRecord(("AA", "11", "01")),
+        _PathRecord(("AA", "11", "02")),
+        _PathRecord(("BB", "22", "10")),
+        _PathRecord(("BB", "22", "11")),
+        _PathRecord(("BB", "22", "12")),
+        _PathRecord(("CC", "33", "20")),
+        _PathRecord(("CC", "33", "21")),
+        _PathRecord(("CC", "33", "22")),
+    ]
+    clusters = split_entry_partitioned_clusters(
+        records,
+        min_cluster_size=3,
+        min_share=0.15,
+        get_path=lambda record: record.full_rf_path,
+        max_clusters=3,
+    )
+    assert len(clusters) == 3
+    prefixes = {cluster[0].hop_tokens for cluster in clusters}
+    assert ("AA", "11") in prefixes
+    assert ("BB", "22") in prefixes
+    assert ("CC", "33") in prefixes
+    assert all(cluster[0].traffic_share == pytest.approx(1 / 3) for cluster in clusters)
 
 
 def test_estimate_origin_geo_prefers_source_side_hop():

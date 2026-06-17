@@ -36,6 +36,37 @@ function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function clusterModeBadge(cluster: SpamFloodCluster): ReactNode {
+  if (cluster.cluster_mode === 'entry_fallback') {
+    return (
+      <div
+        className="rounded bg-amber-500/15 px-2 py-0.5 text-[0.625rem] font-medium text-amber-700 dark:text-amber-300"
+        title="No ingress hop reached the 15% shared-prefix threshold on its own. Grouped by first hop only — typical when several sources split the flood."
+      >
+        Split ingress
+      </div>
+    );
+  }
+  if (cluster.cluster_mode === 'partitioned') {
+    return (
+      <div
+        className="rounded bg-amber-500/15 px-2 py-0.5 text-[0.625rem] font-medium text-amber-700 dark:text-amber-300"
+        title="Multiple ingress sources detected. Each candidate was narrowed within its own entry hop."
+      >
+        Multi-source
+      </div>
+    );
+  }
+  if (cluster.cluster_mode === 'sticky') {
+    return (
+      <div className="rounded bg-muted px-2 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
+        Last known
+      </div>
+    );
+  }
+  return null;
+}
+
 function suspectScore(item: SpamRepeaterStat): number {
   return item.suspect_score ?? 0;
 }
@@ -54,12 +85,45 @@ function formatDuration(seconds: number | null): string {
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
-function formatHotspotLabel(episode: SpamFloodEpisode): string {
-  const name = episode.primary_origin_name ?? episode.primary_entry_name;
-  const hop = episode.primary_origin_hop ?? episode.primary_entry_hop;
+function formatClusterHotspotLabel(cluster: SpamFloodCluster): string {
+  const name = cluster.origin_name ?? cluster.entry_name;
+  const hop = cluster.origin_hop ?? cluster.entry_hop;
   if (name && hop) return `${name} (${hop})`;
   if (hop) return hop;
   return '-';
+}
+
+function episodeReportClusters(episode: SpamFloodEpisode): SpamFloodCluster[] {
+  if (episode.clusters.length > 0) {
+    return episode.clusters.slice(0, 3);
+  }
+  const hop = episode.primary_origin_hop ?? episode.primary_entry_hop;
+  if (!hop) return [];
+  return [
+    {
+      entry_hop: episode.primary_entry_hop ?? hop,
+      entry_name: episode.primary_entry_name,
+      entry_public_key: null,
+      lat: episode.primary_origin_lat,
+      lon: episode.primary_origin_lon,
+      packet_count: episode.total_packets,
+      dominant_route: episode.primary_refined_route ?? hop,
+      hop_tokens: [],
+      refined_route: episode.primary_refined_route ?? '',
+      refined_hop_tokens: [],
+      traffic_share: 0,
+      concentration: 1,
+      narrowing_depth: 1,
+      confidence: episode.primary_confidence ?? 0,
+      origin_hop: episode.primary_origin_hop,
+      origin_name: episode.primary_origin_name,
+      origin_public_key: null,
+      origin_lat: episode.primary_origin_lat,
+      origin_lon: episode.primary_origin_lon,
+      last_seen: episode.ended_at ?? episode.started_at,
+      cluster_mode: null,
+    },
+  ];
 }
 
 function buildMapUrl(lat: number, lon: number): string {
@@ -490,6 +554,21 @@ function LiveFloodSection({ live }: { live: SpamLiveStatus | null }) {
               narrowed cluster.
             </p>
           )}
+          {live.clusters.some((cluster) => cluster.cluster_mode === 'entry_fallback') && (
+            <p className="text-xs text-destructive/90">
+              Split-ingress candidates mean traffic is divided across several entry hops, each below
+              the {formatPercent(live.cluster_min_share ?? 0.15)} shared-prefix bar on its own.
+              Confidence stays low (often near 30%) because the score penalizes shallow, low-share
+              grouping — compare traffic share and packet count instead.
+            </p>
+          )}
+          {live.clusters.some((cluster) => cluster.cluster_mode === 'partitioned') &&
+            !live.clusters.some((cluster) => cluster.cluster_mode === 'entry_fallback') && (
+              <p className="text-xs text-destructive/90">
+                Multiple ingress sources detected. Each hotspot was narrowed inside its own entry hop
+                because no single prefix dominated the whole episode.
+              </p>
+            )}
           <div className="grid gap-2 lg:grid-cols-2">
             {live.clusters.map((cluster, index) => (
               <LiveHotspotCard key={`${cluster.entry_hop}-${index}`} cluster={cluster} index={index} />
@@ -514,19 +593,22 @@ function LiveHotspotCard({ cluster, index }: { cluster: SpamFloodCluster; index:
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">Attack Hotspot #{index + 1}</div>
         <div className="flex items-center gap-2">
-          {cluster.cluster_mode === 'entry_fallback' && (
-            <div className="rounded bg-amber-500/15 px-2 py-0.5 text-[0.625rem] font-medium text-amber-700 dark:text-amber-300">
-              Dispersed
-            </div>
-          )}
-          {cluster.cluster_mode === 'sticky' && (
-            <div className="rounded bg-muted px-2 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
-              Last known
-            </div>
-          )}
+          {clusterModeBadge(cluster)}
           {cluster.confidence > 0 && (
-            <div className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            <div
+              className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+              title={
+                cluster.cluster_mode === 'entry_fallback'
+                  ? 'Low confidence is expected for split-ingress grouping; traffic share is the stronger signal.'
+                  : undefined
+              }
+            >
               {cluster.confidence}% conf
+            </div>
+          )}
+          {cluster.traffic_share > 0 && (
+            <div className="rounded bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive">
+              {formatPercent(cluster.traffic_share)} of flood
             </div>
           )}
           <div className="rounded bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive">
@@ -603,6 +685,51 @@ function LiveHotspotCard({ cluster, index }: { cluster: SpamFloodCluster; index:
   );
 }
 
+function EpisodeHotspotCandidates({ clusters }: { clusters: SpamFloodCluster[] }) {
+  return (
+    <div className="space-y-2">
+      {clusters.map((cluster, index) => {
+        const lat = cluster.origin_lat ?? cluster.lat;
+        const lon = cluster.origin_lon ?? cluster.lon;
+        const hasCoords = lat != null && lon != null;
+        const route =
+          cluster.refined_route && cluster.refined_route !== cluster.dominant_route
+            ? cluster.refined_route
+            : cluster.dominant_route;
+        return (
+          <div
+            key={`${cluster.entry_hop}-${index}`}
+            className="rounded border border-border/70 bg-muted/20 px-2 py-1.5"
+          >
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold">#{index + 1}</span>
+              <span className="font-medium">{formatClusterHotspotLabel(cluster)}</span>
+              {clusterModeBadge(cluster)}
+              <span className="text-muted-foreground">
+                {cluster.packet_count} pkts
+                {cluster.traffic_share > 0 ? ` · ${formatPercent(cluster.traffic_share)} of flood` : ''}
+                {cluster.confidence > 0 ? ` · ${cluster.confidence}% conf` : ''}
+              </span>
+            </div>
+            <div className="mt-1 font-mono text-[0.6875rem] text-muted-foreground">{route}</div>
+            {hasCoords && (
+              <a
+                href={buildMapUrl(lat!, lon!)}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-flex items-center gap-1 font-mono text-[0.6875rem] text-primary hover:underline"
+              >
+                {lat!.toFixed(5)}, {lon!.toFixed(5)}
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              </a>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function FloodEpisodeLogSection({
   episodes,
   loading,
@@ -633,8 +760,9 @@ function FloodEpisodeLogSection({
       <div>
         <h3 className="text-sm font-semibold">Flood Alert History</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Persisted attack log with 14-day baseline context. Stuck in-progress rows usually mean the
-          server restarted mid-attack — delete them or restart once more to auto-close leftovers.
+          Persisted attack log with 14-day baseline context. Each ended episode keeps up to three
+          top hotspot candidates when multiple ingress paths were active. Stuck in-progress rows usually
+          mean the server restarted mid-attack — delete them or restart once more to auto-close leftovers.
         </p>
       </div>
       {deleteError && (
@@ -651,17 +779,13 @@ function FloodEpisodeLogSection({
               <th className="px-3 py-2 text-right">Packets</th>
               <th className="px-3 py-2 text-right">Peak / Window</th>
               <th className="px-3 py-2 text-right">Vs Baseline</th>
-              <th className="px-3 py-2 text-left">Hotspot</th>
-              <th className="px-3 py-2 text-left">Route</th>
-              <th className="px-3 py-2 text-left">Location</th>
+              <th className="px-3 py-2 text-left">Hotspot Candidates</th>
               <th className="px-3 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {episodes.map((episode) => {
-              const lat = episode.primary_origin_lat;
-              const lon = episode.primary_origin_lon;
-              const hasCoords = lat != null && lon != null;
+              const reportClusters = episodeReportClusters(episode);
               const inProgress = episode.ended_at == null;
               return (
                 <tr key={episode.id} className="hover:bg-muted/30">
@@ -684,29 +808,10 @@ function FloodEpisodeLogSection({
                     {episode.anomaly_ratio != null ? `${episode.anomaly_ratio.toFixed(1)}x` : '-'}
                   </td>
                   <td className="px-3 py-2">
-                    <div className="font-medium">{formatHotspotLabel(episode)}</div>
-                    {episode.primary_confidence != null && episode.primary_confidence > 0 && (
-                      <div className="text-xs text-muted-foreground">
-                        {episode.primary_confidence}% confidence
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {episode.primary_refined_route ?? '-'}
-                  </td>
-                  <td className="px-3 py-2">
-                    {hasCoords ? (
-                      <a
-                        href={buildMapUrl(lat!, lon!)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline"
-                      >
-                        {lat!.toFixed(5)}, {lon!.toFixed(5)}
-                        <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                      </a>
+                    {reportClusters.length > 0 ? (
+                      <EpisodeHotspotCandidates clusters={reportClusters} />
                     ) : (
-                      <span className="text-muted-foreground">-</span>
+                      <span className="text-muted-foreground">No narrowed hotspots</span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-right">
@@ -728,14 +833,14 @@ function FloodEpisodeLogSection({
             })}
             {!loading && episodes.length === 0 && (
               <tr>
-                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={9}>
+                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={7}>
                   No flood episodes recorded yet.
                 </td>
               </tr>
             )}
             {loading && (
               <tr>
-                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={9}>
+                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={7}>
                   Loading flood history...
                 </td>
               </tr>

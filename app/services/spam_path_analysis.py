@@ -135,6 +135,78 @@ def split_path_clusters(
     return clusters
 
 
+def split_entry_partitioned_clusters(
+    records: list[RecordT],
+    *,
+    min_cluster_size: int,
+    min_share: float,
+    get_path: Callable[[RecordT], tuple[str, ...]],
+    max_clusters: int = 3,
+) -> list[tuple[NarrowedPrefix, list[RecordT]]]:
+    """Narrow path prefixes independently within each ingress hop.
+
+    Used when a coordinated flood splits across multiple sources so no single
+    prefix reaches ``min_share`` globally, but routes within one ingress hop
+    still share a deeper trunk.
+    """
+    total = len(records)
+    if total == 0:
+        return []
+
+    by_entry: dict[str, list[RecordT]] = {}
+    for record in records:
+        path = get_path(record)
+        if not path:
+            continue
+        by_entry.setdefault(path[0], []).append(record)
+
+    candidates: list[tuple[NarrowedPrefix, list[RecordT]]] = []
+    for entry_records in by_entry.values():
+        if len(entry_records) < min_cluster_size:
+            continue
+        paths = [get_path(record) for record in entry_records]
+        narrowed = narrow_dominant_prefix(paths, min_share=min_share)
+        if narrowed is None:
+            continue
+        prefix = narrowed.hop_tokens
+        matched = [
+            record
+            for record in entry_records
+            if get_path(record)[: len(prefix)] == prefix
+        ]
+        if len(matched) < min_cluster_size:
+            continue
+        parent = prefix[:-1]
+        parent_count = sum(
+            1 for record in entry_records if get_path(record)[: len(parent)] == parent
+        ) if parent else len(entry_records)
+        parent_share = parent_count / len(entry_records) if entry_records else 0.0
+        concentration = (
+            (len(matched) / len(entry_records)) / parent_share if parent_share > 0 else 1.0
+        )
+        candidates.append(
+            (
+                NarrowedPrefix(
+                    hop_tokens=prefix,
+                    packet_count=len(matched),
+                    traffic_share=len(matched) / total,
+                    concentration=concentration,
+                    narrowing_depth=len(prefix),
+                ),
+                matched,
+            )
+        )
+
+    candidates.sort(
+        key=lambda item: (
+            -len(item[1]),
+            -item[0].narrowing_depth,
+            item[0].hop_tokens[0],
+        )
+    )
+    return candidates[:max_clusters]
+
+
 def estimate_origin_geo(
     hop_tokens: list[str] | tuple[str, ...],
     hop_geos: dict[str, dict[str, Any]],

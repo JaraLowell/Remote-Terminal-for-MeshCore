@@ -6,6 +6,7 @@ import pytest
 
 from app.models import ContactUpsert
 from app.repository import ContactRepository
+from app.repository.spam_flood_episodes import SpamFloodEpisodeRepository
 from app.services.spam_live_tracker import SpamLiveTracker
 
 GWNL_GATEWAY = "1228d131fa4b13c78a7aefee124e5c7fe51a8555115220d64d1df749b5a7de8c"
@@ -91,7 +92,8 @@ async def test_spam_live_tracker_falls_back_to_entry_hop_when_paths_are_disperse
 
     clusters = tracker._cluster_packets()
     assert len(clusters) == 3
-    assert all(cluster["cluster_mode"] == "entry_fallback" for cluster in clusters)
+    assert all(cluster["cluster_mode"] == "partitioned" for cluster in clusters)
+    assert all(cluster["narrowing_depth"] >= 2 for cluster in clusters)
     assert clusters[0]["packet_count"] == 3
 
 
@@ -118,6 +120,35 @@ async def test_spam_live_tracker_clusters_multiple_ingress_points(test_db):
     assert len(status.clusters) == 2
     entry_hops = {cluster.entry_hop for cluster in status.clusters}
     assert entry_hops == {"AA", "BB"}
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_persists_multiple_clusters_at_end(test_db):
+    tracker = _make_tracker(packet_threshold=6, cluster_min_ratio=0.15, hold_secs=30)
+
+    for offset in range(4):
+        await tracker.observe_and_maybe_alert(
+            path_hex="AA" + "CC" * 2,
+            path_len=2,
+            observed_at=1_700_000_000 + offset,
+        )
+    for offset in range(4, 8):
+        await tracker.observe_and_maybe_alert(
+            path_hex="BB" + "DD" * 2,
+            path_len=2,
+            observed_at=1_700_000_000 + offset,
+        )
+
+    tracker._sync_active_state(1_700_000_040)
+    await tracker._end_episode(1_700_000_040)
+
+    episodes = await SpamFloodEpisodeRepository.list_recent(limit=10)
+    assert len(episodes) == 1
+    episode = episodes[0]
+    assert len(episode.clusters) == 2
+    entry_hops = {cluster.entry_hop for cluster in episode.clusters}
+    assert entry_hops == {"AA", "BB"}
+    assert episode.primary_entry_hop == "AA"
 
 
 @pytest.mark.asyncio
