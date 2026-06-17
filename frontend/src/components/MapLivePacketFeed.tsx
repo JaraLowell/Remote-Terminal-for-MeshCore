@@ -49,17 +49,28 @@ interface MapLivePacketFeedProps {
 function FeedLine({ entry }: { entry: MapPacketFeedEntry }) {
   return (
     <div className="text-[0.8125rem] leading-[0.9] text-foreground/90 font-mono whitespace-normal break-words">
-      <span className="font-semibold" style={{ color: entry.typeColor }}>
-        {entry.typeLabel}
-      </span>{' '}
-      {entry.hopsPrefix && <span className="text-muted-foreground">{entry.hopsPrefix}</span>}
-      {entry.senderLabel && (
-        <span className="text-foreground/80">
-          From {entry.senderLabel}
-          {entry.messageSuffix && (
-            <span className="text-muted-foreground">{entry.messageSuffix}</span>
-          )}
-        </span>
+      <div>
+        <span className="font-semibold" style={{ color: entry.typeColor }}>
+          {entry.typeLabel}
+        </span>{' '}
+        {entry.hopsPrefix && <span className="text-muted-foreground">{entry.hopsPrefix}</span>}
+        {entry.senderLabel && (
+          <span className="text-foreground/80">
+            From {entry.senderLabel}
+            {entry.channelTargetLabel && (
+              <span className="text-foreground/80"> to {entry.channelTargetLabel}</span>
+            )}
+            {entry.inlineSuffix && (
+              <span className="text-muted-foreground">{entry.inlineSuffix}</span>
+            )}
+          </span>
+        )}
+      </div>
+      {entry.messageBody && (
+        <div className="text-muted-foreground">
+          {'  '}
+          {entry.messageBody}
+        </div>
       )}
     </div>
   );

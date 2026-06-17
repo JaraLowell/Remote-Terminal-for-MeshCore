@@ -1,4 +1,5 @@
 import {
+  ChannelCrypto,
   MeshCoreDecoder,
   PayloadType,
   type DecodedPacket,
@@ -14,14 +15,14 @@ import { getRawPacketObservationKey } from './rawPacketIdentity';
 export const MAP_PACKET_FEED_LIMIT = 12;
 
 const PACKET_TYPE_LABELS: Record<string, string> = {
-  AD: 'ADVERT  ',
-  GT: 'CHANNEL ',
-  DM: 'DIRECT  ',
-  ACK: 'ACK    ',
-  TR: 'TRACE   ',
-  RQ: 'REQUEST ',
+  AD: 'ADVERT',
+  GT: 'CHANNEL',
+  DM: 'DIRECT',
+  ACK: 'ACK',
+  TR: 'TRACE',
+  RQ: 'REQUEST',
   RS: 'RESPONSE',
-  '?':'UNKNOWN ',
+  '?':'UNKNOWN',
 };
 
 export interface MapPacketFeedEntry {
@@ -31,7 +32,9 @@ export interface MapPacketFeedEntry {
   typeColor: string;
   hopsPrefix: string;
   senderLabel: string | null;
-  messageSuffix: string;
+  channelTargetLabel: string | null;
+  messageBody: string | null;
+  inlineSuffix: string;
 }
 
 export interface MapPacketFeedIndexes {
@@ -41,6 +44,7 @@ export interface MapPacketFeedIndexes {
 
 export interface MapPacketFeedContext {
   indexes: MapPacketFeedIndexes;
+  channels: Channel[];
   decoderOptions?: DecryptionOptions;
 }
 
@@ -68,6 +72,7 @@ export function buildMapPacketFeedContext(
 ): MapPacketFeedContext {
   return {
     indexes: buildMapPacketFeedIndexes(contacts),
+    channels: channels ?? [],
     decoderOptions: createDecoderOptions(channels),
   };
 }
@@ -98,10 +103,16 @@ export function formatMapPacketHops(pathBytes: string[]): string {
   return `(${count}->) `;
 }
 
-export function formatMapPacketDecodedMessage(message: string | null | undefined): string {
+export function formatMapPacketFeedMessageBody(message: string | null | undefined): string {
   const trimmed = message?.trim();
   if (!trimmed) return '';
-  return `<br>  ${trimmed}`;
+  return trimmed;
+}
+
+/** @deprecated Use formatMapPacketFeedMessageBody for feed body lines. */
+export function formatMapPacketDecodedMessage(message: string | null | undefined): string {
+  const body = formatMapPacketFeedMessageBody(message);
+  return body ? `: ${body}` : '';
 }
 
 function formatKnownOrToken(
@@ -130,6 +141,22 @@ function formatTokenForDisplay(token: string): string {
     return normalized.slice(0, 6);
   }
   return normalized;
+}
+
+function formatBackendSenderLabel(
+  sender: string | null | undefined,
+  indexes: MapPacketFeedIndexes
+): string | null {
+  if (!sender?.trim()) return null;
+  const trimmed = sender.trim();
+  const contact = indexes.nameIndex.get(trimmed);
+  if (contact) {
+    return getContactDisplayName(contact.name, contact.public_key, contact.last_advert);
+  }
+  if (/^[0-9a-f]+$/i.test(trimmed)) {
+    return formatTokenOrContact(trimmed, indexes);
+  }
+  return trimmed;
 }
 
 function formatTokenOrContact(
@@ -173,6 +200,67 @@ function extractDecodedMessage(packet: RawPacket, decoded: DecodedPacket): strin
   return null;
 }
 
+function resolveChannelNameByKey(
+  channelKey: string | null | undefined,
+  channels: Channel[]
+): string | null {
+  if (!channelKey?.trim()) return null;
+  const normalized = channelKey.trim().toLowerCase();
+  return channels.find((channel) => channel.key.toLowerCase() === normalized)?.name ?? null;
+}
+
+function resolveGroupTextChannelTarget(
+  packet: RawPacket,
+  decoded: DecodedPacket,
+  channels: Channel[]
+): string | null {
+  const backendName = packet.decrypted_info?.channel_name?.trim();
+  if (backendName) return backendName;
+
+  const backendKeyName = resolveChannelNameByKey(packet.decrypted_info?.channel_key, channels);
+  if (backendKeyName) return backendKeyName;
+
+  const payload = decoded.payload.decoded as {
+    channelHash?: string;
+    cipherMac?: string;
+    ciphertext?: string;
+    decrypted?: { message?: string };
+  } | null;
+  if (!payload?.channelHash) return null;
+
+  const hashMatches = channels.filter(
+    (channel) =>
+      ChannelCrypto.calculateChannelHash(channel.key).toUpperCase() ===
+      payload.channelHash?.toUpperCase()
+  );
+  if (hashMatches.length === 1) return hashMatches[0].name;
+  if (
+    hashMatches.length <= 1 ||
+    !payload.cipherMac ||
+    !payload.ciphertext ||
+    !payload.decrypted?.message
+  ) {
+    return null;
+  }
+
+  const decryptMatches = hashMatches.filter(
+    (channel) =>
+      ChannelCrypto.decryptGroupTextMessage(payload.ciphertext!, payload.cipherMac!, channel.key)
+        .success
+  );
+  return decryptMatches.length === 1 ? decryptMatches[0].name : null;
+}
+
+export function formatMapPacketGroupTextInlineSuffix(decoded: DecodedPacket): string {
+  const payload = decoded.payload.decoded as { channelHash?: string } | null;
+  const channelHash = payload?.channelHash?.trim();
+  if (channelHash) {
+    return ` *encrypted* ch:${channelHash.toUpperCase()}`;
+  }
+  return ' *encrypted*';
+}
+
+/** @deprecated Use formatMapPacketGroupTextInlineSuffix for encrypted channel headers. */
 export function formatMapPacketGroupTextSuffix(
   packet: RawPacket,
   decoded: DecodedPacket
@@ -181,13 +269,7 @@ export function formatMapPacketGroupTextSuffix(
   if (message) {
     return formatMapPacketDecodedMessage(message);
   }
-
-  const payload = decoded.payload.decoded as { channelHash?: string } | null;
-  const channelHash = payload?.channelHash?.trim();
-  if (channelHash) {
-    return ` *encrypted* ch:${channelHash.toUpperCase()}`;
-  }
-  return ' *encrypted*';
+  return formatMapPacketGroupTextInlineSuffix(decoded);
 }
 
 export function formatMapPacketSenderFromDecoded(
@@ -217,10 +299,10 @@ export function formatMapPacketSenderFromDecoded(
       if (packet.decrypted_info?.sender) {
         const contact = indexes.nameIndex.get(packet.decrypted_info.sender);
         if (contact) {
-          return formatKnownOrToken(
-            getContactDisplayName(contact.name, contact.public_key, contact.last_advert),
+          return getContactDisplayName(
+            contact.name,
             contact.public_key,
-            indexes
+            contact.last_advert
           );
         }
         return packet.decrypted_info.sender;
@@ -233,10 +315,10 @@ export function formatMapPacketSenderFromDecoded(
       if (sender) {
         const contact = indexes.nameIndex.get(sender);
         if (contact) {
-          return formatKnownOrToken(
-            getContactDisplayName(contact.name, contact.public_key, contact.last_advert),
+          return getContactDisplayName(
+            contact.name,
             contact.public_key,
-            indexes
+            contact.last_advert
           );
         }
         return sender;
@@ -276,15 +358,15 @@ export function formatMapPacketSenderFromDecoded(
 
 function payloadTypeLabel(packet: RawPacket, decoded: DecodedPacket | null): string {
   if (decoded?.isValid) {
-    return PACKET_TYPE_LABELS[getPacketLabel(decoded.payloadType)] ?? 'UNKNOWN';
+    return (PACKET_TYPE_LABELS[getPacketLabel(decoded.payloadType)] ?? 'UNKNOWN').padEnd(9, ' ');
   }
   const backendType = packet.payload_type?.trim();
   if (backendType) {
     const normalized = backendType.toUpperCase();
-    if (normalized === 'PATH') return 'ACK';
-    return normalized;
+    if (normalized === 'PATH') return ('ACK').padEnd(9, ' ');
+    return normalized.padEnd(9, ' ');
   }
-  return 'UNKNOWN';
+  return 'UNKNOWN'.padEnd(9, ' ');
 }
 
 function payloadTypeColor(packet: RawPacket, decoded: DecodedPacket | null): string {
@@ -321,15 +403,40 @@ export function buildMapPacketFeedEntry(
   const hopsPrefix = formatMapPacketHops(decoded ? getDecodedPathTokens(decoded) : []);
   const senderLabel = decoded
     ? formatMapPacketSenderFromDecoded(packet, decoded, context.indexes)
-    : packet.decrypted_info?.sender
-      ? formatTokenOrContact(packet.decrypted_info.sender, context.indexes)
-      : null;
-  const messageSuffix =
-    decoded?.payloadType === PayloadType.GroupText
-      ? formatMapPacketGroupTextSuffix(packet, decoded)
-      : formatMapPacketDecodedMessage(
-          decoded ? extractDecodedMessage(packet, decoded) : packet.decrypted_info?.message
-        );
+    : formatBackendSenderLabel(packet.decrypted_info?.sender, context.indexes);
+  let channelTargetLabel: string | null = null;
+  let messageBody: string | null = null;
+  let inlineSuffix = '';
+
+  const decodedMessage = decoded
+    ? extractDecodedMessage(packet, decoded)
+    : packet.decrypted_info?.message?.trim() || null;
+
+  if (decoded?.payloadType === PayloadType.GroupText) {
+    if (decodedMessage) {
+      channelTargetLabel = resolveGroupTextChannelTarget(packet, decoded, context.channels);
+      messageBody = formatMapPacketFeedMessageBody(decodedMessage);
+    } else {
+      inlineSuffix = formatMapPacketGroupTextInlineSuffix(decoded);
+    }
+  } else if (
+    decoded?.payloadType === PayloadType.TextMessage ||
+    packet.payload_type?.toUpperCase() === 'PRIV'
+  ) {
+    if (decodedMessage) {
+      messageBody = formatMapPacketFeedMessageBody(decodedMessage);
+    }
+  } else if (decodedMessage) {
+    const normalizedType = packet.payload_type?.toUpperCase() ?? '';
+    if (normalizedType.includes('GROUP') || normalizedType === 'CHAN') {
+      channelTargetLabel =
+        packet.decrypted_info?.channel_name?.trim() ??
+        resolveChannelNameByKey(packet.decrypted_info?.channel_key, context.channels);
+      messageBody = formatMapPacketFeedMessageBody(decodedMessage);
+    } else if (normalizedType.includes('TEXT') || normalizedType === 'PRIV') {
+      messageBody = formatMapPacketFeedMessageBody(decodedMessage);
+    }
+  }
 
   return {
     key: getRawPacketObservationKey(packet),
@@ -338,7 +445,9 @@ export function buildMapPacketFeedEntry(
     typeColor,
     hopsPrefix,
     senderLabel,
-    messageSuffix,
+    channelTargetLabel,
+    messageBody,
+    inlineSuffix,
   };
 }
 

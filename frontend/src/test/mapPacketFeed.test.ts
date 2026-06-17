@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { PayloadType } from '@michaelhart/meshcore-decoder';
 
-import type { Contact, RawPacket } from '../types';
+import type { Channel, Contact, RawPacket } from '../types';
 import {
   buildMapPacketFeedContext,
   buildMapPacketFeedEntries,
   buildMapPacketFeedEntry,
-  formatMapPacketDecodedMessage,
-  formatMapPacketGroupTextSuffix,
+  formatMapPacketFeedMessageBody,
+  formatMapPacketGroupTextInlineSuffix,
   formatMapPacketHops,
   formatMapPacketSenderFromDecoded,
 } from '../utils/mapPacketFeed';
@@ -67,17 +67,29 @@ function makeDecodedStub(
   } as Parameters<typeof formatMapPacketSenderFromDecoded>[1];
 }
 
+function makeChannel(name: string, key: string): Channel {
+  return {
+    key,
+    name,
+    is_hashtag: name.startsWith('#'),
+    on_radio: true,
+    favorite: false,
+    last_read_at: null,
+    muted: false,
+  };
+}
+
 describe('mapPacketFeed', () => {
   it('formats hop count instead of listing hop tokens', () => {
     expect(formatMapPacketHops(['aa11', 'bb22'])).toBe('(2->) ');
     expect(formatMapPacketHops([])).toBe('');
   });
 
-  it('formats decoded messages with a 30-character cap', () => {
-    expect(formatMapPacketDecodedMessage('hello')).toBe(': hello');
-    expect(formatMapPacketDecodedMessage('a'.repeat(30))).toBe(`: ${'a'.repeat(30)}`);
-    expect(formatMapPacketDecodedMessage('a'.repeat(31))).toBe(`: ${'a'.repeat(28)}...`);
-    expect(formatMapPacketDecodedMessage('   ')).toBe('');
+  it('formats decoded message bodies without altering text', () => {
+    expect(formatMapPacketFeedMessageBody('hello')).toBe('hello');
+    expect(formatMapPacketFeedMessageBody('a'.repeat(30))).toBe('a'.repeat(30));
+    expect(formatMapPacketFeedMessageBody('a'.repeat(31))).toBe('a'.repeat(31));
+    expect(formatMapPacketFeedMessageBody('   ')).toBe('');
   });
 
   it('shows source hash tokens like the packet feed when no contact matches', () => {
@@ -107,7 +119,7 @@ describe('mapPacketFeed', () => {
     );
 
     expect(formatMapPacketSenderFromDecoded(packet, decoded, indexes)).toBe('02');
-    expect(formatMapPacketGroupTextSuffix(packet, decoded)).toBe(' *encrypted* ch:0E');
+    expect(formatMapPacketGroupTextInlineSuffix(decoded)).toBe(' *encrypted* ch:0E');
     expect(formatMapPacketHops(decoded.path ?? [])).toBe('(7->) ');
   });
 
@@ -128,9 +140,7 @@ describe('mapPacketFeed', () => {
       decrypted: { sender: 'MountainTop' },
     });
 
-    expect(formatMapPacketSenderFromDecoded(packet, decoded, context.indexes)).toBe(
-      'MountainTop (abcdef)'
-    );
+    expect(formatMapPacketSenderFromDecoded(packet, decoded, context.indexes)).toBe('MountainTop');
   });
 
   it('builds feed entries newest-first with a limit of 12', () => {
@@ -160,10 +170,52 @@ describe('mapPacketFeed', () => {
     expect(entry.typeLabel).toBe('ADVERT');
     expect(entry.typeColor).toBe('#f59e0b');
     expect(entry.senderLabel).toBe('solo');
-    expect(entry.messageSuffix).toBe('');
+    expect(entry.messageBody).toBeNull();
+    expect(entry.inlineSuffix).toBe('');
   });
 
-  it('includes truncated decoded message suffix on feed entries', () => {
+  it('puts decoded channel messages on a second indented line with channel target', () => {
+    const channels = [makeChannel('#mesh', '0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e')];
+    const context = buildMapPacketFeedContext([], channels);
+    const entry = buildMapPacketFeedEntry(
+      makePacket({
+        payload_type: 'GroupText',
+        decrypted: true,
+        decrypted_info: {
+          sender: 'T1000-E 🍄',
+          channel_name: '#mesh',
+          message: '@[Purple(Mobile)] komt binnen in Nieuw Vennep',
+        } as RawPacket['decrypted_info'],
+      }),
+      context
+    );
+
+    expect(entry.senderLabel).toBe('T1000-E 🍄');
+    expect(entry.channelTargetLabel).toBe('#mesh');
+    expect(entry.messageBody).toBe('@[Purple(Mobile)] komt binnen in Nieuw Vennep');
+    expect(entry.inlineSuffix).toBe('');
+  });
+
+  it('puts decoded direct messages on a second indented line', () => {
+    const context = buildMapPacketFeedContext([]);
+    const entry = buildMapPacketFeedEntry(
+      makePacket({
+        payload_type: 'TextMessage',
+        decrypted: true,
+        decrypted_info: {
+          sender: 'Alice',
+          message: 'hello there',
+        } as RawPacket['decrypted_info'],
+      }),
+      context
+    );
+
+    expect(entry.channelTargetLabel).toBeNull();
+    expect(entry.messageBody).toBe('hello there');
+    expect(entry.inlineSuffix).toBe('');
+  });
+
+  it('keeps long decoded message bodies on feed entries', () => {
     const context = buildMapPacketFeedContext([]);
     const entry = buildMapPacketFeedEntry(
       makePacket({
@@ -177,7 +229,8 @@ describe('mapPacketFeed', () => {
       context
     );
 
-    expect(entry.messageSuffix).toBe(`: ${'x'.repeat(28)}...`);
+    expect(entry.messageBody).toBe('x'.repeat(35));
+    expect(entry.inlineSuffix).toBe('');
   });
 
   it('treats Path packets like ACK for label and live-traffic color', () => {
