@@ -281,7 +281,9 @@ function payloadTypeLabel(packet: RawPacket, decoded: DecodedPacket | null): str
   }
   const backendType = packet.payload_type?.trim();
   if (backendType) {
-    return backendType.toUpperCase();
+    const normalized = backendType.toUpperCase();
+    if (normalized === 'PATH') return 'ACK';
+    return normalized;
   }
   return 'UNKNOWN';
 }
@@ -294,7 +296,7 @@ function payloadTypeColor(packet: RawPacket, decoded: DecodedPacket | null): str
   if (normalized.includes('ADVERT')) return PARTICLE_COLOR_MAP.AD;
   if (normalized.includes('GROUP') || normalized === 'CHAN') return PARTICLE_COLOR_MAP.GT;
   if (normalized.includes('TEXT') || normalized === 'PRIV') return PARTICLE_COLOR_MAP.DM;
-  if (normalized.includes('ACK')) return PARTICLE_COLOR_MAP.ACK;
+  if (normalized.includes('ACK') || normalized === 'PATH') return PARTICLE_COLOR_MAP.ACK;
   if (normalized.includes('TRACE')) return PARTICLE_COLOR_MAP.TR;
   if (normalized.includes('REQUEST')) return PARTICLE_COLOR_MAP.RQ;
   if (normalized.includes('RESPONSE')) return PARTICLE_COLOR_MAP.RS;

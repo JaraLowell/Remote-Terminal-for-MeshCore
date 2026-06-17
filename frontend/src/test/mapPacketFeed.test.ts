@@ -11,6 +11,7 @@ import {
   formatMapPacketHops,
   formatMapPacketSenderFromDecoded,
 } from '../utils/mapPacketFeed';
+import { getPacketLabel, PARTICLE_COLOR_MAP } from '../utils/visualizerUtils';
 
 function makeContact(overrides: Partial<Contact> = {}): Contact {
   return {
@@ -177,5 +178,10 @@ describe('mapPacketFeed', () => {
     );
 
     expect(entry.messageSuffix).toBe(`: ${'x'.repeat(28)}...`);
+  });
+
+  it('treats Path packets like ACK for label and live-traffic color', () => {
+    expect(getPacketLabel(PayloadType.Path)).toBe('ACK');
+    expect(PARTICLE_COLOR_MAP[getPacketLabel(PayloadType.Path)]).toBe(PARTICLE_COLOR_MAP.ACK);
   });
 });

@@ -196,6 +196,7 @@ export function getPacketLabel(payloadType: number): PacketLabel {
     case PayloadType.TextMessage:
       return 'DM';
     case PayloadType.Ack:
+    case PayloadType.Path:
       return 'ACK';
     case PayloadType.Trace:
       return 'TR';
