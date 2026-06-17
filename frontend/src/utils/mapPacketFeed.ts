@@ -14,14 +14,14 @@ import { getRawPacketObservationKey } from './rawPacketIdentity';
 export const MAP_PACKET_FEED_LIMIT = 12;
 
 const PACKET_TYPE_LABELS: Record<string, string> = {
-  AD: 'ADVERT',
-  GT: 'CHANNEL',
-  DM: 'DIRECT',
-  ACK: 'ACK',
-  TR: 'TRACE',
-  RQ: 'REQUEST',
+  AD: 'ADVERT  ',
+  GT: 'CHANNEL ',
+  DM: 'DIRECT  ',
+  ACK: 'ACK    ',
+  TR: 'TRACE   ',
+  RQ: 'REQUEST ',
   RS: 'RESPONSE',
-  '?': 'UNKNOWN',
+  '?':'UNKNOWN ',
 };
 
 export interface MapPacketFeedEntry {
@@ -101,7 +101,7 @@ export function formatMapPacketHops(pathBytes: string[]): string {
 export function formatMapPacketDecodedMessage(message: string | null | undefined): string {
   const trimmed = message?.trim();
   if (!trimmed) return '';
-  return `\n   ${trimmed}`;
+  return `<br>  ${trimmed}`;
 }
 
 function formatKnownOrToken(
