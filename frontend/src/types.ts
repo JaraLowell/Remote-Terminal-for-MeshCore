@@ -400,6 +400,27 @@ export interface SpamRouteStatsResponse {
   routes: SpamRouteStat[];
 }
 
+export interface SpamFloodCluster {
+  entry_hop: string;
+  entry_name: string | null;
+  entry_public_key: string | null;
+  lat: number | null;
+  lon: number | null;
+  packet_count: number;
+  dominant_route: string;
+  hop_tokens: string[];
+  last_seen: number;
+}
+
+export interface SpamLiveStatus {
+  active: boolean;
+  window_secs: number;
+  packet_threshold: number;
+  total_packets: number;
+  detected_at: number | null;
+  clusters: SpamFloodCluster[];
+}
+
 type ConversationType =
   | 'contact'
   | 'channel'

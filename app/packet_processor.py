@@ -59,11 +59,36 @@ from app.services.messages import (
 from app.services.messages import (
     create_message_from_decrypted as _create_message_from_decrypted,
 )
+from app.services.spam_live_tracker import spam_live_tracker
 from app.websocket import broadcast_error, broadcast_event
 
 logger = logging.getLogger(__name__)
 
 _raw_observation_counter = count(1)
+
+
+async def _maybe_track_live_spam_flood(packet_info: PacketInfo | None, timestamp: int) -> None:
+    """Feed DM path observations into the live spam flood tracker."""
+    if packet_info is None:
+        return
+    if packet_info.payload_type not in {PayloadType.TEXT_MESSAGE, PayloadType.RESPONSE}:
+        return
+
+    path_hex = packet_info.path.hex() if packet_info.path else ""
+    path_len = packet_info.path_length
+    if not path_hex or path_len <= 0:
+        return
+
+    try:
+        status = await spam_live_tracker.observe_and_maybe_alert(
+            path_hex=path_hex,
+            path_len=path_len,
+            observed_at=timestamp,
+        )
+        if status is not None:
+            broadcast_event("spam_flood_alert", status.model_dump())
+    except Exception:
+        logger.exception("Live spam flood tracking failed")
 
 
 def derive_meshcore_region_key(region_name: str) -> bytes:
@@ -585,6 +610,7 @@ async def process_raw_packet(
 
     # Always broadcast raw packet for the packet feed UI (even duplicates)
     # This enables the frontend cracker to see all incoming packets in real-time
+    await _maybe_track_live_spam_flood(packet_info, ts)
     broadcast_payload = RawPacketBroadcast(
         id=packet_id,
         observation_id=observation_id,

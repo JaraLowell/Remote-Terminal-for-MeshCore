@@ -110,6 +110,7 @@ interface SidebarProps {
   isConversationNotificationsEnabled?: (type: 'channel' | 'contact', id: string) => boolean;
   blockedKeys?: string[];
   blockedNames?: string[];
+  spamFloodActive?: boolean;
 }
 
 function loadInitialSectionSortOrders(): SidebarSectionSortOrders {
@@ -138,6 +139,7 @@ export function Sidebar({
   isConversationNotificationsEnabled,
   blockedKeys = [],
   blockedNames = [],
+  spamFloodActive = false,
 }: SidebarProps) {
   const isContactBlocked = useCallback(
     (c: Contact) =>
@@ -629,12 +631,14 @@ export function Sidebar({
     icon,
     label,
     onClick,
+    badge,
   }: {
     key: string;
     active?: boolean;
     icon: React.ReactNode;
     label: React.ReactNode;
     onClick: () => void;
+    badge?: React.ReactNode;
   }) => (
     <div
       key={key}
@@ -653,6 +657,7 @@ export function Sidebar({
         {icon}
       </span>
       <span className="sidebar-tool-label flex-1 truncate">{label}</span>
+      {badge}
     </div>
   );
 
@@ -733,6 +738,11 @@ export function Sidebar({
           active: isActive('spam', 'spam'),
           icon: <Activity className="h-4 w-4" />,
           label: 'Spam Paths',
+          badge: spamFloodActive ? (
+            <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wider text-destructive">
+              Flood
+            </span>
+          ) : undefined,
           onClick: () =>
             handleSelectConversation({
               type: 'spam',

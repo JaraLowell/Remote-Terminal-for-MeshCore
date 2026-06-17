@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     skip_post_connect_sync: bool = False
     basic_auth_username: str = ""
     basic_auth_password: str = ""
+    spam_gateway_keys: str = Field(
+        default="",
+        description=(
+            "Comma-separated full public keys for internet/MQTT gateway repeaters. "
+            "When empty, built-in GWNL defaults are used. Set to 'none' to disable gateway stripping."
+        ),
+    )
+    spam_live_window_secs: int = Field(default=30, ge=5, le=300)
+    spam_live_packet_threshold: int = Field(default=50, ge=5, le=1000)
+    spam_live_cluster_min_ratio: float = Field(default=0.15, ge=0.05, le=1.0)
+    spam_live_broadcast_cooldown_secs: int = Field(default=10, ge=1, le=120)
 
     @model_validator(mode="after")
     def validate_transport_exclusivity(self) -> "Settings":

@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Crosshair, RadioTower, RefreshCw, Route } from 'lucide-react';
+import { AlertTriangle, Crosshair, ExternalLink, MapPin, RadioTower, RefreshCw, Route } from 'lucide-react';
 
 import { api } from '../api';
-import type { SpamRepeaterStat, SpamRouteStat, SpamRouteStatsResponse } from '../types';
+import type {
+  SpamFloodCluster,
+  SpamLiveStatus,
+  SpamRepeaterStat,
+  SpamRouteStat,
+  SpamRouteStatsResponse,
+} from '../types';
 import { Button } from './ui/button';
 
 type WindowOption = 1 | 6 | 24 | 72 | 168;
 
 const WINDOW_OPTIONS: WindowOption[] = [1, 6, 24, 72, 168];
+const LIVE_POLL_MS = 5000;
 
 function formatSeen(timestamp: number | null): string {
   if (timestamp == null) return '-';
@@ -38,12 +45,28 @@ function getRoutePreview(routes: SpamRouteStat[], hop: string): string {
   return route?.route ?? '-';
 }
 
-export function SpamRoutesView() {
+function buildMapUrl(lat: number, lon: number): string {
+  return `https://www.google.com/maps?q=${lat},${lon}`;
+}
+
+interface SpamRoutesViewProps {
+  liveStatus?: SpamLiveStatus | null;
+  onLiveStatusChange?: (status: SpamLiveStatus) => void;
+}
+
+export function SpamRoutesView({ liveStatus, onLiveStatusChange }: SpamRoutesViewProps) {
   const [windowHours, setWindowHours] = useState<WindowOption>(24);
   const [data, setData] = useState<SpamRouteStatsResponse | null>(null);
+  const [localLiveStatus, setLocalLiveStatus] = useState<SpamLiveStatus | null>(liveStatus ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
+
+  useEffect(() => {
+    if (liveStatus != null) {
+      setLocalLiveStatus(liveStatus);
+    }
+  }, [liveStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +87,30 @@ export function SpamRoutesView() {
       cancelled = true;
     };
   }, [windowHours, refreshNonce]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshLive = () => {
+      api
+        .getSpamLiveStatus()
+        .then((status) => {
+          if (cancelled) return;
+          setLocalLiveStatus(status);
+          onLiveStatusChange?.(status);
+        })
+        .catch((err) => {
+          if (!cancelled) console.error(err);
+        });
+    };
+
+    refreshLive();
+    const intervalId = window.setInterval(refreshLive, LIVE_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [onLiveStatusChange]);
 
   const sourceSideMax = useMemo(
     () => Math.max(1, ...(data?.repeaters.map((item) => item.source_side_count) ?? [0])),
@@ -88,6 +135,7 @@ export function SpamRoutesView() {
       }));
   }, [data]);
   const topRoute = data?.routes[0];
+  const live = localLiveStatus;
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-background">
@@ -96,7 +144,7 @@ export function SpamRoutesView() {
           <div>
             <h2 className="font-semibold text-base">Spam Path Analysis</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Direct-message path observations ranked by repeater/hop usage.
+              Live flood detection plus historical direct-message path observations.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -133,6 +181,8 @@ export function SpamRoutesView() {
             {error}
           </div>
         )}
+
+        <LiveFloodSection live={live} />
 
         <div className="grid gap-3 sm:grid-cols-3">
           <Metric
@@ -298,6 +348,112 @@ export function SpamRoutesView() {
             </table>
           </div>
         </section>
+      </div>
+    </div>
+  );
+}
+
+function LiveFloodSection({ live }: { live: SpamLiveStatus | null }) {
+  if (!live) {
+    return (
+      <section className="rounded-md border border-border bg-muted/10 px-3 py-4 text-sm text-muted-foreground">
+        Loading live flood monitor...
+      </section>
+    );
+  }
+
+  if (!live.active) {
+    return (
+      <section className="rounded-md border border-border bg-muted/10 px-3 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">Live Flood Monitor</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Watching the last {live.window_secs}s for {live.packet_threshold}+ DM path observations.
+            </p>
+          </div>
+          <div className="rounded bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+            {live.total_packets} / {live.packet_threshold} packets
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />
+          <div>
+            <h3 className="text-sm font-semibold text-destructive">Coordinated DM Flood Detected</h3>
+            <p className="mt-1 text-xs text-destructive/90">
+              {live.total_packets} packets in {live.window_secs}s
+              {live.detected_at != null ? ` · since ${formatSeen(live.detected_at)}` : ''}
+            </p>
+          </div>
+        </div>
+        <div className="rounded bg-destructive/15 px-2 py-1 text-[0.625rem] font-semibold uppercase tracking-wider text-destructive">
+          Live alarm
+        </div>
+      </div>
+
+      {live.clusters.length === 0 ? (
+        <p className="text-xs text-destructive/90">
+          Flood volume exceeded threshold, but no ingress cluster met the minimum share yet.
+        </p>
+      ) : (
+        <div className="grid gap-2 lg:grid-cols-2">
+          {live.clusters.map((cluster, index) => (
+            <LiveHotspotCard key={`${cluster.entry_hop}-${index}`} cluster={cluster} index={index} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LiveHotspotCard({ cluster, index }: { cluster: SpamFloodCluster; index: number }) {
+  const hasCoords = cluster.lat != null && cluster.lon != null;
+
+  return (
+    <div className="rounded-md border border-destructive/30 bg-background/80 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">Attack Hotspot #{index + 1}</div>
+        <div className="rounded bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive">
+          {cluster.packet_count} pkts
+        </div>
+      </div>
+      <div className="mt-3 space-y-2 text-xs">
+        <div>
+          <div className="text-muted-foreground">RF ingress path</div>
+          <div className="mt-0.5 font-mono text-sm">{cluster.dominant_route}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground">Primary entry hop</div>
+          <div className="mt-0.5 font-medium">
+            {cluster.entry_name ?? `[${cluster.entry_hop}]`}
+            <span className="ml-2 font-mono text-muted-foreground">{cluster.entry_hop}</span>
+          </div>
+        </div>
+        {hasCoords && (
+          <div className="flex flex-wrap items-center gap-2">
+            <MapPin className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            <span className="font-mono tabular-nums">
+              {cluster.lat!.toFixed(5)}, {cluster.lon!.toFixed(5)}
+            </span>
+            <a
+              href={buildMapUrl(cluster.lat!, cluster.lon!)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-primary hover:underline"
+            >
+              Open map
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+          </div>
+        )}
+        <div className="text-muted-foreground">Last seen {formatSeen(cluster.last_seen)}</div>
       </div>
     </div>
   );

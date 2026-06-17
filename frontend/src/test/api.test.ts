@@ -141,6 +141,27 @@ describe('fetchJson (via api methods)', () => {
       const [url] = mockFetch.mock.calls[0];
       expect(url).toBe('./api/messages/spam/routes?window_hours=24&limit=25&repeater_limit=10');
     });
+
+    it('builds spam live status endpoint', async () => {
+      installMockFetch();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            active: false,
+            window_secs: 30,
+            packet_threshold: 50,
+            total_packets: 0,
+            detected_at: null,
+            clusters: [],
+          }),
+      });
+
+      await api.getSpamLiveStatus();
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toBe('./api/messages/spam/live');
+    });
   });
 
   describe('error handling', () => {

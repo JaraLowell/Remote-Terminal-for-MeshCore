@@ -554,6 +554,35 @@ class SpamRouteStatsResponse(BaseModel):
     routes: list[SpamRouteStat]
 
 
+class SpamFloodCluster(BaseModel):
+    """A live clustered ingress hotspot for coordinated DM floods."""
+
+    entry_hop: str = Field(description="First RF hop identifier for this cluster")
+    entry_name: str | None = Field(default=None, description="Resolved contact name when known")
+    entry_public_key: str | None = Field(
+        default=None, description="Resolved contact public key when prefix is unique"
+    )
+    lat: float | None = Field(default=None, description="Resolved latitude when available")
+    lon: float | None = Field(default=None, description="Resolved longitude when available")
+    packet_count: int = Field(description="Packets in this cluster during the live window")
+    dominant_route: str = Field(description="Most common RF-only route label for this cluster")
+    hop_tokens: list[str] = Field(description="Hop tokens for the dominant RF-only route")
+    last_seen: int = Field(description="Unix timestamp of the newest packet in this cluster")
+
+
+class SpamLiveStatus(BaseModel):
+    """Live rolling-window flood detection status."""
+
+    active: bool = Field(description="True when packet volume exceeds the live threshold")
+    window_secs: int = Field(description="Rolling window size in seconds")
+    packet_threshold: int = Field(description="Packet count that triggers an active flood alert")
+    total_packets: int = Field(description="Current packet count inside the rolling window")
+    detected_at: int | None = Field(
+        default=None, description="Unix timestamp when the current flood episode started"
+    )
+    clusters: list[SpamFloodCluster] = Field(default_factory=list)
+
+
 class ResendChannelMessageResponse(BaseModel):
     status: str
     message_id: int

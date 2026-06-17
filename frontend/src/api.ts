@@ -43,6 +43,7 @@ import type {
   TrackedTelemetryResponse,
   StatisticsResponse,
   SpamRouteStatsResponse,
+  SpamLiveStatus,
   TraceResponse,
   UnreadCounts,
 } from './types';
@@ -290,6 +291,7 @@ export const api = {
     const query = searchParams.toString();
     return fetchJson<SpamRouteStatsResponse>(`/messages/spam/routes${query ? `?${query}` : ''}`);
   },
+  getSpamLiveStatus: () => fetchJson<SpamLiveStatus>('/messages/spam/live'),
   sendDirectMessage: (destination: string, text: string) =>
     fetchJson<Message>('/messages/direct', {
       method: 'POST',

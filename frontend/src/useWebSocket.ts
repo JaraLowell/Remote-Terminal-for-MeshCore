@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import type { Channel, HealthStatus, Contact, Message, MessagePath, RawPacket } from './types';
+import type { Channel, HealthStatus, Contact, Message, MessagePath, RawPacket, SpamLiveStatus } from './types';
 import { parseWsEvent } from './wsEvents';
 
 interface ErrorEvent {
@@ -29,6 +29,7 @@ export interface UseWebSocketOptions {
   ) => void;
   onError?: (error: ErrorEvent) => void;
   onSuccess?: (success: SuccessEvent) => void;
+  onSpamFloodAlert?: (status: SpamLiveStatus) => void;
   onReconnect?: () => void;
 }
 
@@ -150,6 +151,9 @@ export function useWebSocket(options: UseWebSocketOptions) {
             break;
           case 'success':
             handlers.onSuccess?.(msg.data as SuccessEvent);
+            break;
+          case 'spam_flood_alert':
+            handlers.onSpamFloodAlert?.(msg.data as SpamLiveStatus);
             break;
           case 'pong':
             // Heartbeat response, ignore

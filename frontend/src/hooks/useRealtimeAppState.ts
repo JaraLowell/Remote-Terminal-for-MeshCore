@@ -21,6 +21,7 @@ import type {
   Message,
   MessagePath,
   RawPacket,
+  SpamLiveStatus,
 } from '../types';
 
 interface UseRealtimeAppStateArgs {
@@ -60,6 +61,7 @@ interface UseRealtimeAppStateArgs {
   notifyIncomingMessage?: (msg: Message) => void;
   recordRawPacketObservation?: (packet: RawPacket) => void;
   maxRawPackets?: number;
+  setSpamLiveStatus?: Dispatch<SetStateAction<SpamLiveStatus | null>>;
 }
 
 function isMessageBlocked(msg: Message, blockedKeys: string[], blockedNames: string[]): boolean {
@@ -110,6 +112,7 @@ export function useRealtimeAppState({
   notifyIncomingMessage,
   recordRawPacketObservation,
   maxRawPackets = 500,
+  setSpamLiveStatus,
 }: UseRealtimeAppStateArgs): UseWebSocketOptions {
   const mergeChannelIntoList = useCallback(
     (updated: Channel) => {
@@ -275,6 +278,9 @@ export function useRealtimeAppState({
       ) => {
         receiveMessageAck(messageId, ackCount, paths, packetId);
       },
+      onSpamFloodAlert: (status: SpamLiveStatus) => {
+        setSpamLiveStatus?.(status);
+      },
     }),
     [
       activeConversationRef,
@@ -297,6 +303,7 @@ export function useRealtimeAppState({
       refreshUnreads,
       reconcileOnReconnect,
       removeConversationMessages,
+      setSpamLiveStatus,
       setActiveConversation,
       setChannels,
       setContacts,

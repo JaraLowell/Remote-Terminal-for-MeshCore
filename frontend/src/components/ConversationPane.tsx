@@ -19,6 +19,7 @@ import type {
   RadioTraceHopRequest,
   RadioTraceResponse,
   Region,
+  SpamLiveStatus,
 } from '../types';
 import type { RawPacketStatsSessionState } from '../utils/rawPacketStats';
 import { CONTACT_TYPE_REPEATER, CONTACT_TYPE_ROOM } from '../types';
@@ -97,6 +98,8 @@ interface ConversationPaneProps {
   onClearRepeaterAutoLogin: () => void;
   blockedKeys?: string[];
   blockedNames?: string[];
+  spamLiveStatus?: SpamLiveStatus | null;
+  onSpamLiveStatusChange?: (status: SpamLiveStatus) => void;
 }
 
 function LoadingPane({ label }: { label: string }) {
@@ -179,6 +182,8 @@ export function ConversationPane({
   onClearRepeaterAutoLogin,
   blockedKeys,
   blockedNames,
+  spamLiveStatus,
+  onSpamLiveStatusChange,
 }: ConversationPaneProps) {
   const [roomAuthenticated, setRoomAuthenticated] = useState(false);
   const activeContactIsRepeater = useMemo(() => {
@@ -272,7 +277,12 @@ export function ConversationPane({
   }
 
   if (activeConversation.type === 'spam') {
-    return <SpamRoutesView />;
+    return (
+      <SpamRoutesView
+        liveStatus={spamLiveStatus}
+        onLiveStatusChange={onSpamLiveStatusChange}
+      />
+    );
   }
 
   if (activeContactIsRepeater) {

@@ -11,6 +11,7 @@ from app.models import (
     SendChannelMessageRequest,
     SendDirectMessageRequest,
     SpamRouteStatsResponse,
+    SpamLiveStatus,
 )
 from app.repository import AmbiguousPublicKeyPrefixError, AppSettingsRepository, MessageRepository
 from app.services.message_send import (
@@ -18,6 +19,7 @@ from app.services.message_send import (
     send_channel_message_to_channel,
     send_direct_message_to_contact,
 )
+from app.services.spam_live_tracker import spam_live_tracker
 from app.services.radio_runtime import radio_runtime as radio_manager
 from app.websocket import broadcast_error, broadcast_event
 
@@ -42,6 +44,12 @@ async def get_spam_route_stats(
         limit=limit,
         repeater_limit=repeater_limit,
     )
+
+
+@router.get("/spam/live", response_model=SpamLiveStatus)
+async def get_spam_live_status() -> SpamLiveStatus:
+    """Return the current rolling-window DM flood detection status."""
+    return await spam_live_tracker.get_live_status()
 
 
 @router.get("/around/{message_id}", response_model=MessagesAroundResponse)

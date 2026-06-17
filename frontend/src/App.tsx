@@ -33,6 +33,7 @@ import type {
   Message,
   RawPacket,
   Region,
+  SpamLiveStatus,
 } from './types';
 import { CONTACT_TYPE_REPEATER, CONTACT_TYPE_ROOM } from './types';
 import { shouldAutoFocusInput } from './utils/autoFocusInput';
@@ -93,6 +94,7 @@ export function App() {
 
   const messageInputRef = useRef<MessageInputHandle>(null);
   const [rawPackets, setRawPackets] = useState<RawPacket[]>([]);
+  const [spamLiveStatus, setSpamLiveStatus] = useState<SpamLiveStatus | null>(null);
   const [regions, setRegions] = useState<Region[]>([]);
   const [channelUnreadMarker, setChannelUnreadMarker] = useState<ChannelUnreadMarker | null>(null);
   const [newMessagePrefillRequest, setNewMessagePrefillRequest] =
@@ -462,6 +464,7 @@ export function App() {
     receiveMessageAck,
     notifyIncomingMessage,
     recordRawPacketObservation,
+    setSpamLiveStatus,
   });
   const handleVisibilityPolicyChanged = useCallback(() => {
     clearConversationMessages();
@@ -594,6 +597,7 @@ export function App() {
     isConversationNotificationsEnabled,
     blockedKeys: appSettings?.blocked_keys ?? [],
     blockedNames: appSettings?.blocked_names ?? [],
+    spamFloodActive: spamLiveStatus?.active ?? false,
   };
   const bulkAddChannelResultModalProps = {
     result: bulkAddResult,
@@ -693,6 +697,8 @@ export function App() {
     onClearRepeaterAutoLogin: () => setRepeaterAutoLoginKey(null),
     blockedKeys: appSettings?.blocked_keys,
     blockedNames: appSettings?.blocked_names,
+    spamLiveStatus,
+    onSpamLiveStatusChange: setSpamLiveStatus,
   };
   const searchProps = {
     contacts,
@@ -782,6 +788,7 @@ export function App() {
     fetchConfig();
     fetchAppSettings();
     fetchUndecryptedCount();
+    api.getSpamLiveStatus().then(setSpamLiveStatus).catch(console.error);
 
     // Fetch contacts and channels via REST (parallel, faster than WS serial push)
     takePrefetchOrFetch('channels', api.getChannels).then(setChannels).catch(console.error);

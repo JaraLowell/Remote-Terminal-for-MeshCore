@@ -1,4 +1,4 @@
-import type { Channel, Contact, HealthStatus, Message, MessagePath, RawPacket } from './types';
+import type { Channel, Contact, HealthStatus, Message, MessagePath, RawPacket, SpamLiveStatus } from './types';
 
 export interface MessageAckedPayload {
   message_id: number;
@@ -54,6 +54,7 @@ export type KnownWsEvent =
   | { type: 'location'; data: LocationPayload }
   | { type: 'error'; data: ToastPayload }
   | { type: 'success'; data: ToastPayload }
+  | { type: 'spam_flood_alert'; data: SpamLiveStatus }
   | { type: 'pong'; data?: null };
 
 export interface UnknownWsEvent {
@@ -88,6 +89,7 @@ export function parseWsEvent(raw: string): ParsedWsEvent {
     case 'location':
     case 'error':
     case 'success':
+    case 'spam_flood_alert':
       return {
         type: parsed.type,
         data: parsed.data,
