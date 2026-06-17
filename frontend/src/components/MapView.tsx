@@ -190,8 +190,10 @@ const MAP_ROLE_LABELS: Record<MapRoleKey, string> = {
 const THREE_DAYS_SEC = 3 * 24 * 60 * 60;
 const PARTICLE_LIFETIME_MS = 3500;
 const PARTICLE_TAIL_LENGTH = 0.3;
-const PARTICLE_RADIUS = 9;
-const PARTICLE_TAIL_WIDTH = 6;
+const PARTICLE_RADIUS = 7;
+const PARTICLE_TAIL_WIDTH = 4.5;
+const PARTICLE_GLOW_RADIUS = 3;
+const PARTICLE_SHADOW_BLUR = 9;
 const MAX_MAP_PARTICLES = 200;
 const ROUTE_LINE_OPACITY = 0.32;
 const ROUTE_LINE_WEIGHT = 2;
@@ -686,24 +688,35 @@ function ParticleOverlay({ particles }: { particles: MapParticle[] }) {
         const head = pointAtDist(headDist);
         const tail = pointAtDist(tailDist);
 
-        // Draw tail as a gradient line from transparent to opaque
-        const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-        grad.addColorStop(0, particle.color + '00');
-        grad.addColorStop(1, particle.color + 'cc');
-        ctx.beginPath();
-        ctx.moveTo(tail.x, tail.y);
-
-        // Sample intermediate points along the tail for curved paths
-        const steps = 8;
-        for (let s = 1; s <= steps; s++) {
-          const d = tailDist + ((headDist - tailDist) * s) / steps;
-          const pt = pointAtDist(d);
-          ctx.lineTo(pt.x, pt.y);
+        // Tail follows route polyline with sharp corners (no round caps / curve sampling).
+        const tailPoints: { x: number; y: number }[] = [tail];
+        let vertexDist = 0;
+        for (let i = 0; i < segLengths.length; i++) {
+          vertexDist += segLengths[i];
+          if (vertexDist > tailDist && vertexDist < headDist) {
+            tailPoints.push({ x: pixelPath[i + 1].x, y: pixelPath[i + 1].y });
+          }
         }
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = PARTICLE_TAIL_WIDTH;
-        ctx.lineCap = 'round';
-        ctx.stroke();
+        const lastTailPoint = tailPoints[tailPoints.length - 1];
+        if (lastTailPoint.x !== head.x || lastTailPoint.y !== head.y) {
+          tailPoints.push(head);
+        }
+
+        if (tailPoints.length >= 2) {
+          const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+          grad.addColorStop(0, particle.color + '00');
+          grad.addColorStop(1, particle.color + 'cc');
+          ctx.beginPath();
+          ctx.moveTo(tailPoints[0].x, tailPoints[0].y);
+          for (let i = 1; i < tailPoints.length; i++) {
+            ctx.lineTo(tailPoints[i].x, tailPoints[i].y);
+          }
+          ctx.strokeStyle = grad;
+          ctx.lineWidth = PARTICLE_TAIL_WIDTH;
+          ctx.lineCap = 'butt';
+          ctx.lineJoin = 'miter';
+          ctx.stroke();
+        }
 
         // Draw head blob with glow
         const fade = progress > 0.8 ? 1 - (progress - 0.8) / 0.2 : 1;
@@ -712,7 +725,7 @@ function ParticleOverlay({ particles }: { particles: MapParticle[] }) {
           .padStart(2, '0');
         // Outer glow
         ctx.beginPath();
-        ctx.arc(head.x, head.y, PARTICLE_RADIUS + 4, 0, Math.PI * 2);
+        ctx.arc(head.x, head.y, PARTICLE_RADIUS + PARTICLE_GLOW_RADIUS, 0, Math.PI * 2);
         ctx.fillStyle =
           particle.color +
           Math.round(fade * 40)
@@ -724,7 +737,7 @@ function ParticleOverlay({ particles }: { particles: MapParticle[] }) {
         ctx.arc(head.x, head.y, PARTICLE_RADIUS, 0, Math.PI * 2);
         ctx.fillStyle = particle.color + alpha;
         ctx.shadowColor = particle.color;
-        ctx.shadowBlur = 12 * fade;
+        ctx.shadowBlur = PARTICLE_SHADOW_BLUR * fade;
         ctx.fill();
         ctx.shadowBlur = 0;
         // Bright center
