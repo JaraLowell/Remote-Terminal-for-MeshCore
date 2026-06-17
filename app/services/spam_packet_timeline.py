@@ -1,0 +1,151 @@
+"""Historical raw-packet timeline by payload/route category for spam analysis."""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from app.database import db
+from app.decoder import PayloadType
+
+# Display order for stacked chart (bottom to top).
+CATEGORY_ORDER: tuple[str, ...] = (
+    "pm_transport",
+    "dm",
+    "group_transport",
+    "group_text",
+    "response",
+    "request",
+    "path",
+    "ack",
+    "advert",
+    "anon_request",
+    "trace",
+    "control",
+    "other",
+)
+
+CATEGORY_LABELS: dict[str, str] = {
+    "pm_transport": "PM Transport",
+    "dm": "Direct DM",
+    "group_transport": "Group Text Transport",
+    "group_text": "Group Text",
+    "request": "Request",
+    "response": "Response",
+    "path": "Path",
+    "ack": "ACK",
+    "advert": "Advert",
+    "anon_request": "Anon Request",
+    "trace": "Trace",
+    "control": "Control",
+    "other": "Other",
+}
+
+_PAYLOAD_CATEGORY: dict[int, str] = {
+    PayloadType.REQUEST: "request",
+    PayloadType.RESPONSE: "response",
+    PayloadType.ACK: "ack",
+    PayloadType.ADVERT: "advert",
+    PayloadType.GROUP_DATA: "other",
+    PayloadType.ANON_REQUEST: "anon_request",
+    PayloadType.PATH: "path",
+    PayloadType.TRACE: "trace",
+    PayloadType.MULTIPART: "other",
+    PayloadType.CONTROL: "control",
+    PayloadType.ATLAS: "other",
+    PayloadType.LOCATION: "other",
+    PayloadType.RAW_CUSTOM: "other",
+}
+
+
+def classify_packet_header(header: int) -> str:
+    """Map the first packet byte to a chart category."""
+    route_type = header & 0x03
+    payload_type = (header >> 2) & 0x0F
+    is_transport = route_type in (0x00, 0x03)
+
+    if payload_type == PayloadType.TEXT_MESSAGE:
+        return "pm_transport" if is_transport else "dm"
+    if payload_type == PayloadType.GROUP_TEXT:
+        return "group_transport" if is_transport else "group_text"
+
+    try:
+        return _PAYLOAD_CATEGORY.get(PayloadType(payload_type), "other")
+    except ValueError:
+        return "other"
+
+
+class SpamPacketTimelineService:
+    @staticmethod
+    async def get_timeline(
+        *,
+        window_hours: int = 24,
+        bucket_minutes: int = 30,
+        now: int | None = None,
+    ) -> dict[str, Any]:
+        now_ts = now if now is not None else int(time.time())
+        bucket_secs = max(60, bucket_minutes * 60)
+        since = now_ts - window_hours * 3600
+        bucket_start = (since // bucket_secs) * bucket_secs
+
+        async with db.readonly() as conn:
+            async with conn.execute(
+                """
+                SELECT timestamp, substr(data, 1, 1) AS header_byte
+                FROM raw_packets
+                WHERE timestamp >= ?
+                ORDER BY timestamp
+                """,
+                (since,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+        bucket_counts: dict[int, dict[str, int]] = {}
+        totals_by_category: dict[str, int] = {key: 0 for key in CATEGORY_ORDER}
+
+        for row in rows:
+            timestamp = int(row["timestamp"])
+            header_raw = row["header_byte"]
+            if header_raw is None or len(header_raw) < 1:
+                category = "other"
+            else:
+                category = classify_packet_header(header_raw[0])
+
+            bucket_ts = (timestamp // bucket_secs) * bucket_secs
+            counts = bucket_counts.setdefault(bucket_ts, {key: 0 for key in CATEGORY_ORDER})
+            counts[category] = counts.get(category, 0) + 1
+            totals_by_category[category] = totals_by_category.get(category, 0) + 1
+
+        end_bucket = (now_ts // bucket_secs) * bucket_secs
+        buckets: list[dict[str, Any]] = []
+        current = bucket_start
+        while current <= end_bucket:
+            counts = bucket_counts.get(current, {key: 0 for key in CATEGORY_ORDER})
+            buckets.append(
+                {
+                    "timestamp": current,
+                    "counts": counts,
+                    "total": sum(counts.values()),
+                }
+            )
+            current += bucket_secs
+
+        active_categories = [
+            category
+            for category in CATEGORY_ORDER
+            if totals_by_category.get(category, 0) > 0
+        ]
+
+        return {
+            "window_hours": window_hours,
+            "bucket_minutes": bucket_minutes,
+            "generated_at": now_ts,
+            "categories": active_categories,
+            "category_labels": {key: CATEGORY_LABELS[key] for key in active_categories},
+            "buckets": buckets,
+            "totals_by_category": {
+                key: totals_by_category.get(key, 0)
+                for key in active_categories
+            },
+            "total_packets": sum(totals_by_category.values()),
+        }

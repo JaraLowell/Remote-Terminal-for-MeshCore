@@ -10,6 +10,7 @@ import type {
   SpamRouteStatsResponse,
 } from '../types';
 import { Button } from './ui/button';
+import { SpamPacketTimelineSection } from './SpamPacketTimelineSection';
 
 type WindowOption = 1 | 6 | 24 | 72 | 168;
 
@@ -214,6 +215,8 @@ export function SpamRoutesView({ liveStatus, onLiveStatusChange }: SpamRoutesVie
             {error}
           </div>
         )}
+
+        <SpamPacketTimelineSection refreshNonce={refreshNonce} />
 
         <LiveFloodSection live={live} />
 

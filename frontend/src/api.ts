@@ -45,6 +45,7 @@ import type {
   SpamRouteStatsResponse,
   SpamLiveStatus,
   SpamFloodEpisodesResponse,
+  SpamPacketTimelineResponse,
   TraceResponse,
   UnreadCounts,
 } from './types';
@@ -298,6 +299,19 @@ export const api = {
     if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
     const query = searchParams.toString();
     return fetchJson<SpamFloodEpisodesResponse>(`/messages/spam/episodes${query ? `?${query}` : ''}`);
+  },
+  getSpamPacketTimeline: (params?: { windowHours?: number; bucketMinutes?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.windowHours !== undefined) {
+      searchParams.set('window_hours', params.windowHours.toString());
+    }
+    if (params?.bucketMinutes !== undefined) {
+      searchParams.set('bucket_minutes', params.bucketMinutes.toString());
+    }
+    const query = searchParams.toString();
+    return fetchJson<SpamPacketTimelineResponse>(
+      `/messages/spam/packet-timeline${query ? `?${query}` : ''}`
+    );
   },
   sendDirectMessage: (destination: string, text: string) =>
     fetchJson<Message>('/messages/direct', {

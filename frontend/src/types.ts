@@ -470,6 +470,23 @@ export interface SpamFloodEpisodesResponse {
   episodes: SpamFloodEpisode[];
 }
 
+export interface SpamPacketTimelineBucket {
+  timestamp: number;
+  counts: Record<string, number>;
+  total: number;
+}
+
+export interface SpamPacketTimelineResponse {
+  window_hours: number;
+  bucket_minutes: number;
+  generated_at: number;
+  categories: string[];
+  category_labels: Record<string, string>;
+  buckets: SpamPacketTimelineBucket[];
+  totals_by_category: Record<string, number>;
+  total_packets: number;
+}
+
 type ConversationType =
   | 'contact'
   | 'channel'

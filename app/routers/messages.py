@@ -11,6 +11,7 @@ from app.models import (
     SendChannelMessageRequest,
     SendDirectMessageRequest,
     SpamFloodEpisodesResponse,
+    SpamPacketTimelineResponse,
     SpamRouteStatsResponse,
     SpamLiveStatus,
 )
@@ -22,6 +23,7 @@ from app.services.message_send import (
     send_direct_message_to_contact,
 )
 from app.services.spam_live_tracker import spam_live_tracker
+from app.services.spam_packet_timeline import SpamPacketTimelineService
 from app.services.radio_runtime import radio_runtime as radio_manager
 from app.websocket import broadcast_error, broadcast_event
 
@@ -61,6 +63,19 @@ async def get_spam_flood_episodes(
     """Return persisted DM flood episode history."""
     episodes = await SpamFloodEpisodeRepository.list_recent(limit=limit)
     return SpamFloodEpisodesResponse(episodes=episodes)
+
+
+@router.get("/spam/packet-timeline", response_model=SpamPacketTimelineResponse)
+async def get_spam_packet_timeline(
+    window_hours: int = Query(default=24, ge=1, le=72),
+    bucket_minutes: int = Query(default=30, ge=5, le=120),
+) -> SpamPacketTimelineResponse:
+    """Return raw packet counts by type over a historical window."""
+    payload = await SpamPacketTimelineService.get_timeline(
+        window_hours=window_hours,
+        bucket_minutes=bucket_minutes,
+    )
+    return SpamPacketTimelineResponse(**payload)
 
 
 @router.get("/around/{message_id}", response_model=MessagesAroundResponse)

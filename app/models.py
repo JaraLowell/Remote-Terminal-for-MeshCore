@@ -686,6 +686,23 @@ class SpamFloodEpisodesResponse(BaseModel):
     episodes: list[SpamFloodEpisode]
 
 
+class SpamPacketTimelineBucket(BaseModel):
+    timestamp: int
+    counts: dict[str, int] = Field(default_factory=dict)
+    total: int = 0
+
+
+class SpamPacketTimelineResponse(BaseModel):
+    window_hours: int
+    bucket_minutes: int
+    generated_at: int
+    categories: list[str]
+    category_labels: dict[str, str]
+    buckets: list[SpamPacketTimelineBucket]
+    totals_by_category: dict[str, int]
+    total_packets: int
+
+
 class ResendChannelMessageResponse(BaseModel):
     status: str
     message_id: int
