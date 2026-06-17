@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { Channel, HealthStatus, Contact, Message, MessagePath, RawPacket, SpamLiveStatus } from './types';
+import type { LocationPayload } from './wsEvents';
 import { parseWsEvent } from './wsEvents';
 
 interface ErrorEvent {
@@ -30,6 +31,7 @@ export interface UseWebSocketOptions {
   onError?: (error: ErrorEvent) => void;
   onSuccess?: (success: SuccessEvent) => void;
   onSpamFloodAlert?: (status: SpamLiveStatus) => void;
+  onLocation?: (location: LocationPayload) => void;
   onReconnect?: () => void;
 }
 
@@ -159,8 +161,7 @@ export function useWebSocket(options: UseWebSocketOptions) {
             // Heartbeat response, ignore
             break;
           case 'location':
-            // Location tracker event - contact updates are handled via 'contact' event
-            // This provides additional telemetry but doesn't need separate UI handling
+            handlers.onLocation?.(msg.data as LocationPayload);
             break;
           case 'unknown':
             console.warn('Unknown WebSocket message type:', msg.rawType);

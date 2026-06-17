@@ -4,6 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { MapView } from '../components/MapView';
 import type { Contact } from '../types';
 
+vi.mock('../api', () => ({
+  api: {
+    getAllTrackerLocationHistory: vi.fn().mockResolvedValue([]),
+  },
+}));
+
 const mockCanvas2dContext = {
   clearRect: vi.fn(),
   save: vi.fn(),
@@ -88,6 +94,7 @@ describe('MapView', () => {
       first_seen: null,
       is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
 
     render(<MapView contacts={[contact]} focusedKey={contact.public_key} />);
@@ -121,6 +128,7 @@ describe('MapView', () => {
       first_seen: null,
       is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
     const onSelectContact = vi.fn();
 
@@ -156,6 +164,7 @@ describe('MapView', () => {
       first_seen: null,
       is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
 
     render(<MapView contacts={[contact]} />);
@@ -191,6 +200,7 @@ describe('MapView', () => {
         first_seen: null,
         is_tracker: false,
         tracker_name: null,
+      tracker_heading: null,
       };
 
       const { rerender } = render(<MapView contacts={[contact]} focusedKey={null} />);
@@ -229,6 +239,7 @@ describe('MapView', () => {
       first_seen: null,
 is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
     const blocked: Contact = {
       public_key: 'bb'.repeat(32),
@@ -252,6 +263,7 @@ is_tracker: false,
       first_seen: null,
 is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
 
     render(<MapView contacts={[visible, blocked]} blockedKeys={['bb'.repeat(32)]} />);
@@ -283,6 +295,7 @@ is_tracker: false,
       first_seen: null,
 is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
     const blocked: Contact = {
       public_key: 'cc'.repeat(32),
@@ -306,6 +319,7 @@ is_tracker: false,
       first_seen: null,
 is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
 
     render(<MapView contacts={[visible, blocked]} blockedNames={['BadActor']} />);
@@ -337,6 +351,7 @@ is_tracker: false,
       first_seen: null,
 is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
     const blocked: Contact = {
       public_key: 'bb'.repeat(32),
@@ -360,11 +375,43 @@ is_tracker: false,
       first_seen: null,
 is_tracker: false,
       tracker_name: null,
+      tracker_heading: null,
     };
 
     render(<MapView contacts={[visible, blocked]} blockedKeys={['bb'.repeat(32)]} />);
 
     expect(screen.getByText('Visible')).toBeInTheDocument();
     expect(screen.queryByText('Blocked')).toBeNull();
+  });
+
+  it('shows tracker heading in the popup when available', () => {
+    const tracker: Contact = {
+      public_key: 'dd'.repeat(32),
+      name: 'Mobile Node',
+      type: 1,
+      flags: 0,
+      direct_path: null,
+      direct_path_len: -1,
+      direct_path_hash_mode: -1,
+      route_override_path: null,
+      route_override_len: null,
+      route_override_hash_mode: null,
+      last_advert: null,
+      lat: 52.1,
+      lon: 5.1,
+      last_seen: Math.floor(Date.now() / 1000),
+      on_radio: false,
+      favorite: false,
+      last_contacted: null,
+      last_read_at: null,
+      first_seen: null,
+      is_tracker: true,
+      tracker_name: 'Van-1',
+      tracker_heading: 127,
+    };
+
+    render(<MapView contacts={[tracker]} />);
+
+    expect(screen.getByText('Heading: 127°')).toBeInTheDocument();
   });
 });

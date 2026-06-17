@@ -69,8 +69,9 @@ class ContactRepository:
                                       route_override_path, route_override_len,
                                       route_override_hash_mode,
                                       last_advert, lat, lon, last_seen,
-                                      on_radio, last_contacted, first_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      on_radio, last_contacted, first_seen,
+                                      is_tracker, tracker_name, tracker_heading)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(public_key) DO UPDATE SET
                     name = COALESCE(excluded.name, contacts.name),
                     type = CASE WHEN excluded.type = 0 THEN contacts.type ELSE excluded.type END,
@@ -103,7 +104,13 @@ class ContactRepository:
                     END,
                     on_radio = COALESCE(excluded.on_radio, contacts.on_radio),
                     last_contacted = COALESCE(excluded.last_contacted, contacts.last_contacted),
-                    first_seen = COALESCE(contacts.first_seen, excluded.first_seen)
+                    first_seen = COALESCE(contacts.first_seen, excluded.first_seen),
+                    is_tracker = CASE
+                        WHEN excluded.is_tracker IS NOT NULL THEN excluded.is_tracker
+                        ELSE contacts.is_tracker
+                    END,
+                    tracker_name = COALESCE(excluded.tracker_name, contacts.tracker_name),
+                    tracker_heading = COALESCE(excluded.tracker_heading, contacts.tracker_heading)
                 """,
                 (
                     contact_row.public_key.lower(),
@@ -124,6 +131,9 @@ class ContactRepository:
                     contact_row.on_radio,
                     contact_row.last_contacted,
                     contact_row.first_seen,
+                    None if contact_row.is_tracker is None else int(contact_row.is_tracker),
+                    contact_row.tracker_name,
+                    contact_row.tracker_heading,
                 ),
             ):
                 pass
@@ -180,6 +190,11 @@ class ContactRepository:
             last_contacted=row["last_contacted"],
             last_read_at=row["last_read_at"],
             first_seen=row["first_seen"],
+            is_tracker=bool(row["is_tracker"]) if "is_tracker" in available_columns else False,
+            tracker_name=row["tracker_name"] if "tracker_name" in available_columns else None,
+            tracker_heading=(
+                row["tracker_heading"] if "tracker_heading" in available_columns else None
+            ),
         )
 
     @staticmethod

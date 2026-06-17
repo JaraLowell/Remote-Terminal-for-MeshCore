@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -177,6 +177,14 @@ const MAP_ROLE_RADIUS: Record<MapRoleKey, number> = {
   unknown: 7,
 };
 
+/** Shrink markers when zoomed out so dense regions stay readable. */
+function getMarkerZoomScale(zoom: number): number {
+  const refZoom = 11;
+  const minScale = 0.28;
+  const scale = 2 ** ((zoom - refZoom) / 2.5);
+  return Math.min(1, Math.max(minScale, scale));
+}
+
 const MAP_ROLE_LABELS: Record<MapRoleKey, string> = {
   repeater: 'Repeater',
   companion: 'Companion',
@@ -214,31 +222,32 @@ function getMarkerStaleOpacity(lastSeen: number | null | undefined): number {
   return 0.4;
 }
 
-function makeRoleMarkerIcon(role: MapRoleKey, opacity: number): L.DivIcon {
+function makeRoleMarkerIcon(role: MapRoleKey, opacity: number, scale = 1): L.DivIcon {
   const color = MAP_ROLE_COLORS[role];
-  const radius = MAP_ROLE_RADIUS[role];
-  const size = radius * 2 + 4;
+  const radius = MAP_ROLE_RADIUS[role] * scale;
+  const size = radius * 2 + Math.max(2, 4 * scale);
   const c = size / 2;
   const stroke = '#1a1a1a';
+  const strokeWidth = Math.max(1, 2 * scale);
   let inner = '';
 
   switch (role) {
     case 'repeater':
-      inner = `<circle cx="${c}" cy="${c}" r="${radius}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="2"/>`;
+      inner = `<circle cx="${c}" cy="${c}" r="${radius}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
       break;
     case 'companion':
-      inner = `<rect x="${c - radius}" y="${c - radius}" width="${radius * 2}" height="${radius * 2}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="2"/>`;
+      inner = `<rect x="${c - radius}" y="${c - radius}" width="${radius * 2}" height="${radius * 2}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
       break;
     case 'room': {
       const d = radius;
-      inner = `<polygon points="${c},${c - d} ${c + d},${c} ${c},${c + d} ${c - d},${c}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="2"/>`;
+      inner = `<polygon points="${c},${c - d} ${c + d},${c} ${c},${c + d} ${c - d},${c}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
       break;
     }
     case 'sensor':
-      inner = `<polygon points="${c},${c - radius} ${c + radius},${c + radius} ${c - radius},${c + radius}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="2"/>`;
+      inner = `<polygon points="${c},${c - radius} ${c + radius},${c + radius} ${c - radius},${c + radius}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
       break;
     default:
-      inner = `<circle cx="${c}" cy="${c}" r="${radius - 1}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="2" stroke-dasharray="3 2"/>`;
+      inner = `<circle cx="${c}" cy="${c}" r="${Math.max(1, radius - 1)}" fill="${color}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-dasharray="3 2"/>`;
   }
 
   return L.divIcon({
@@ -247,6 +256,34 @@ function makeRoleMarkerIcon(role: MapRoleKey, opacity: number): L.DivIcon {
     iconSize: [size, size],
     iconAnchor: [c, c],
     popupAnchor: [0, -radius],
+  });
+}
+
+function makeTrackerMarkerIcon(scale = 1, heading: number | null = null): L.DivIcon {
+  const size = Math.max(16, Math.round(28 * scale));
+  const c = size / 2;
+  const dotR = Math.max(2, 3.5 * scale);
+  const arrowLen = Math.max(4, 8 * scale);
+  const arrowHalfW = Math.max(2, 3 * scale);
+  const color = '#0072B2';
+  const stroke = '#1a1a1a';
+  const strokeW = Math.max(1, 1.5 * scale);
+
+  const dot = `<circle cx="${c}" cy="${c}" r="${dotR}" fill="${color}" stroke="${stroke}" stroke-width="${strokeW}"/>`;
+
+  let arrow = '';
+  if (heading != null && Number.isFinite(heading)) {
+    const tipY = c - dotR - arrowLen;
+    const baseY = c - dotR + Math.max(0.5, scale);
+    arrow = `<g transform="rotate(${heading} ${c} ${c})"><polygon points="${c},${tipY} ${c + arrowHalfW},${baseY} ${c - arrowHalfW},${baseY}" fill="${color}" stroke="${stroke}" stroke-width="${Math.max(0.5, strokeW * 0.75)}"/></g>`;
+  }
+
+  return L.divIcon({
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">${arrow}${dot}</svg>`,
+    className: 'tracker-marker',
+    iconSize: [size, size],
+    iconAnchor: [c, c],
+    popupAnchor: [0, -Math.max(dotR, arrowLen * 0.5 + dotR)],
   });
 }
 
@@ -385,6 +422,125 @@ function MapBoundsHandler({
   }, [map, contacts, hasInitialized, focusedContact]);
 
   return null;
+}
+
+function ContactMarkersLayer({
+  contacts,
+  focusedContact,
+  onSelectContact,
+  resolveTrackerHeading,
+}: {
+  contacts: Contact[];
+  focusedContact: Contact | null;
+  onSelectContact?: (contact: Contact) => void;
+  resolveTrackerHeading: (contact: Contact) => number | null;
+}) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(() => map.getZoom());
+  const markerScale = getMarkerZoomScale(zoom);
+
+  useMapEvents({
+    zoom: () => setZoom(map.getZoom()),
+    zoomend: () => setZoom(map.getZoom()),
+  });
+
+  const markerRefs = useRef<Record<string, L.Marker | null>>({});
+
+  const setMarkerRef = useCallback((key: string, ref: L.Marker | null) => {
+    if (ref === null) {
+      delete markerRefs.current[key];
+      return;
+    }
+    markerRefs.current[key] = ref;
+  }, []);
+
+  useEffect(() => {
+    const currentKeys = new Set(contacts.map((contact) => contact.public_key));
+    for (const key of Object.keys(markerRefs.current)) {
+      if (!currentKeys.has(key)) {
+        delete markerRefs.current[key];
+      }
+    }
+  }, [contacts]);
+
+  useEffect(() => {
+    if (focusedContact && markerRefs.current[focusedContact.public_key]) {
+      const timer = setTimeout(() => {
+        markerRefs.current[focusedContact.public_key]?.openPopup();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [focusedContact]);
+
+  return (
+    <>
+      {contacts.map((contact) => {
+        const isRepeater = contact.type === CONTACT_TYPE_REPEATER;
+        const isTracker = contact.is_tracker;
+        const roleKey = getContactRoleKey(contact);
+        const markerOpacity = getMarkerStaleOpacity(contact.last_seen);
+        const displayName = contact.name || contact.public_key.slice(0, 12);
+        const lastHeardLabel =
+          contact.last_seen != null ? formatTime(contact.last_seen) : 'Never heard by this server';
+
+        const trackerHeading = isTracker ? resolveTrackerHeading(contact) : null;
+
+        const icon = isTracker
+          ? makeTrackerMarkerIcon(markerScale, trackerHeading)
+          : makeRoleMarkerIcon(roleKey, markerOpacity, markerScale);
+
+        return (
+          <Marker
+            key={contact.public_key}
+            ref={(ref) => setMarkerRef(contact.public_key, ref)}
+            position={[contact.lat!, contact.lon!]}
+            icon={icon}
+          >
+            <Popup>
+              <div className="text-sm">
+                <div className="font-medium flex items-center gap-1">
+                  {isRepeater && (
+                    <span title="Repeater" aria-hidden="true">
+                      🛜
+                    </span>
+                  )}
+                  {isTracker && (
+                    <span className="text-[0.625rem] uppercase tracking-wider px-1 py-0.5 rounded bg-primary/10">
+                      Tracker
+                    </span>
+                  )}
+                  {onSelectContact ? (
+                    <button
+                      type="button"
+                      className="p-0 bg-transparent border-0 font-inherit text-primary underline hover:text-primary/80 cursor-pointer"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelectContact(contact);
+                      }}
+                      title={`Open conversation with ${displayName}`}
+                    >
+                      {displayName}
+                    </button>
+                  ) : (
+                    displayName
+                  )}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">Last heard: {lastHeardLabel}</div>
+                {isTracker && trackerHeading != null && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    Heading: {trackerHeading.toFixed(0)}°
+                  </div>
+                )}
+                <div className="text-xs text-gray-400 mt-1 font-mono">
+                  {contact.lat!.toFixed(5)}, {contact.lon!.toFixed(5)}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        );
+      })}
+    </>
+  );
 }
 
 // --- Canvas particle overlay ---
@@ -598,6 +754,42 @@ export function MapView({
   const [particles, setParticles] = useState<MapParticle[]>([]);
   const particleIdRef = useRef(0);
   const seenObservationsRef = useRef(new Set<string>());
+
+  const [historyHeadings, setHistoryHeadings] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!contacts.some((c) => c.is_tracker && c.tracker_heading == null)) return;
+
+    api
+      .getAllTrackerLocationHistory()
+      .then((data) => {
+        const headings: Record<string, number> = {};
+        for (const { contact, history } of data) {
+          for (let i = history.length - 1; i >= 0; i--) {
+            const heading = history[i].heading;
+            if (heading != null && Number.isFinite(heading)) {
+              headings[contact.public_key] = heading;
+              break;
+            }
+          }
+        }
+        setHistoryHeadings(headings);
+      })
+      .catch((err) => {
+        console.error('Failed to bootstrap tracker headings:', err);
+      });
+  }, [contacts]);
+
+  const resolveTrackerHeading = useCallback(
+    (contact: Contact): number | null => {
+      if (contact.tracker_heading != null && Number.isFinite(contact.tracker_heading)) {
+        return contact.tracker_heading;
+      }
+      const fromHistory = historyHeadings[contact.public_key];
+      return fromHistory != null && Number.isFinite(fromHistory) ? fromHistory : null;
+    },
+    [historyHeadings]
+  );
 
   // Tracker location history (movement trails)
   const [showTrails, setShowTrails] = useState(false);
@@ -858,35 +1050,6 @@ export function MapView({
     (focusedContact.last_seen == null ||
       focusedContact.last_seen <= (showPackets ? threeDaysAgoSec : sevenDaysAgo));
 
-  // Track marker refs to open popup programmatically
-  const markerRefs = useRef<Record<string, L.Marker | null>>({});
-
-  const setMarkerRef = useCallback((key: string, ref: L.Marker | null) => {
-    if (ref === null) {
-      delete markerRefs.current[key];
-      return;
-    }
-    markerRefs.current[key] = ref;
-  }, []);
-
-  useEffect(() => {
-    const currentKeys = new Set(mappableContacts.map((contact) => contact.public_key));
-    for (const key of Object.keys(markerRefs.current)) {
-      if (!currentKeys.has(key)) {
-        delete markerRefs.current[key];
-      }
-    }
-  }, [mappableContacts]);
-
-  useEffect(() => {
-    if (focusedContact && markerRefs.current[focusedContact.public_key]) {
-      const timer = setTimeout(() => {
-        markerRefs.current[focusedContact.public_key]?.openPopup();
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [focusedContact]);
-
   // Gather unique link paths for static route lines when packet viz is on
   const routeLines = useMemo(() => {
     if (!showPackets) return [];
@@ -934,6 +1097,18 @@ export function MapView({
               {MAP_ROLE_LABELS[role]}
             </span>
           ))}
+          <span className="flex items-center gap-1">
+            <span
+              className="inline-flex h-3 w-3 shrink-0 items-center justify-center"
+              aria-hidden="true"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                <polygon points="6,1 8,6 6,5 4,6" fill="#0072B2" stroke="#1a1a1a" strokeWidth="0.75" />
+                <circle cx="6" cy="6" r="2" fill="#0072B2" stroke="#1a1a1a" strokeWidth="0.75" />
+              </svg>
+            </span>
+            Tracker
+          </span>
           {showPackets && (
             <>
               <span className="hidden sm:inline text-muted-foreground/60">|</span>
@@ -1069,78 +1244,12 @@ export function MapView({
               />
             ))}
 
-          {mappableContacts.map((contact) => {
-            const isRepeater = contact.type === CONTACT_TYPE_REPEATER;
-            const isTracker = contact.is_tracker;
-            const roleKey = getContactRoleKey(contact);
-            const markerOpacity = getMarkerStaleOpacity(contact.last_seen);
-            const displayName = contact.name || contact.public_key.slice(0, 12);
-            const lastHeardLabel =
-              contact.last_seen != null
-                ? formatTime(contact.last_seen)
-                : 'Never heard by this server';
-
-            const trackerIcon = isTracker
-              ? L.divIcon({
-                  html: '<div style="font-size: 24px; line-height: 1; text-align: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">🚗</div>',
-                  className: 'tracker-marker',
-                  iconSize: [32, 32],
-                  iconAnchor: [16, 16],
-                  popupAnchor: [0, -16],
-                })
-              : undefined;
-            const roleIcon = makeRoleMarkerIcon(roleKey, markerOpacity);
-
-            const markerContent = (
-              <Popup>
-                <div className="text-sm">
-                  <div className="font-medium flex items-center gap-1">
-                    {isRepeater && (
-                      <span title="Repeater" aria-hidden="true">
-                        🛜
-                      </span>
-                    )}
-                    {isTracker && (
-                      <span title="Tracker" aria-hidden="true">
-                        🚗
-                      </span>
-                    )}
-                    {onSelectContact ? (
-                      <button
-                        type="button"
-                        className="p-0 bg-transparent border-0 font-inherit text-primary underline hover:text-primary/80 cursor-pointer"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onSelectContact(contact);
-                        }}
-                        title={`Open conversation with ${displayName}`}
-                      >
-                        {displayName}
-                      </button>
-                    ) : (
-                      displayName
-                    )}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">Last heard: {lastHeardLabel}</div>
-                  <div className="text-xs text-gray-400 mt-1 font-mono">
-                    {contact.lat!.toFixed(5)}, {contact.lon!.toFixed(5)}
-                  </div>
-                </div>
-              </Popup>
-            );
-
-            return (
-              <Fragment key={contact.public_key}>
-                <Marker
-                  ref={(ref) => setMarkerRef(contact.public_key, ref)}
-                  position={[contact.lat!, contact.lon!]}
-                  icon={isTracker ? trackerIcon! : roleIcon}
-                >
-                  {markerContent}
-                </Marker>
-              </Fragment>
-            );
-          })}
+          <ContactMarkersLayer
+            contacts={mappableContacts}
+            focusedContact={focusedContact}
+            onSelectContact={onSelectContact}
+            resolveTrackerHeading={resolveTrackerHeading}
+          />
 
           {showPackets && <ParticleOverlay particles={particles} />}
         </MapContainer>

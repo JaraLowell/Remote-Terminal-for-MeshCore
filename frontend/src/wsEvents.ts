@@ -26,6 +26,7 @@ export interface ToastPayload {
 }
 
 export interface LocationPayload {
+  public_key?: string;
   node_id: string;
   name: string | null;
   lat: number;

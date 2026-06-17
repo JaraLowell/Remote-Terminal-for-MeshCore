@@ -44,6 +44,7 @@ class ContactUpsert(BaseModel):
     first_seen: int | None = None
     is_tracker: bool | None = None
     tracker_name: str | None = None
+    tracker_heading: float | None = None
 
     @classmethod
     def from_contact(cls, contact: Contact, **changes) -> ContactUpsert:
@@ -119,6 +120,7 @@ class Contact(BaseModel):
     first_seen: int | None = None
     is_tracker: bool = False  # True if this contact sends LOCATION packets
     tracker_name: str | None = None  # Name from LOCATION packet
+    tracker_heading: float | None = None  # Last known heading in degrees (LOCATION packets)
     effective_route: ContactRoute | None = None
     effective_route_source: Literal["override", "direct", "flood"] = "flood"
     direct_route: ContactRoute | None = None

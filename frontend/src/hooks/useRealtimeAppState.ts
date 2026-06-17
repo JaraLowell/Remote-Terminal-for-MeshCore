@@ -23,6 +23,7 @@ import type {
   RawPacket,
   SpamLiveStatus,
 } from '../types';
+import type { LocationPayload } from '../wsEvents';
 
 interface UseRealtimeAppStateArgs {
   prevHealthRef: MutableRefObject<HealthStatus | null>;
@@ -219,6 +220,34 @@ export function useRealtimeAppState({
       },
       onContact: (contact: Contact) => {
         setContacts((prev) => mergeContactIntoList(prev, contact));
+      },
+      onLocation: (location: LocationPayload) => {
+        if (!location.public_key || !Number.isFinite(location.heading)) return;
+        setContacts((prev) => {
+          const idx = prev.findIndex((c) => c.public_key === location.public_key);
+          if (idx < 0) return prev;
+          const existing = prev[idx];
+          const merged: Contact = {
+            ...existing,
+            lat: location.lat,
+            lon: location.lon,
+            is_tracker: true,
+            tracker_heading: location.heading,
+          };
+          if (location.name && !existing.tracker_name) {
+            merged.tracker_name = location.name;
+          }
+          const unchanged =
+            existing.lat === merged.lat &&
+            existing.lon === merged.lon &&
+            existing.is_tracker === merged.is_tracker &&
+            existing.tracker_heading === merged.tracker_heading &&
+            existing.tracker_name === merged.tracker_name;
+          if (unchanged) return prev;
+          const updated = [...prev];
+          updated[idx] = merged;
+          return updated;
+        });
       },
       onContactResolved: (previousPublicKey: string, contact: Contact) => {
         setContacts((prev) =>

@@ -966,6 +966,7 @@ async def _process_location(
         last_seen=timestamp,  # Server receive time
         is_tracker=True,  # Mark as tracker
         tracker_name=location.name,  # Store tracker name
+        tracker_heading=location.heading,
     )
 
     # Update name if provided in location packet and contact doesn't have one

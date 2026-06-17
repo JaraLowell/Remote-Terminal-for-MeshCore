@@ -153,6 +153,8 @@ export interface Contact {
   first_seen: number | null;
   is_tracker: boolean;
   tracker_name: string | null;
+  /** Last known heading in degrees from LOCATION packets (0 = north, clockwise). */
+  tracker_heading?: number | null;
 }
 
 export interface LocationHistory {
