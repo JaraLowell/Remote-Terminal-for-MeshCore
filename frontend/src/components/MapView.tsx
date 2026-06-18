@@ -830,23 +830,6 @@ export function MapView({
       });
   }, [showTrails]);
 
-  // Build prefix index and name index for hop resolution
-  const { prefixIndex, nameIndex } = useMemo(() => {
-    const prefix = new Map<string, Contact[]>();
-    const name = new Map<string, Contact>();
-    for (const c of contacts) {
-      const pubkey = c.public_key.toLowerCase();
-      for (let len = 1; len <= 12 && len <= pubkey.length; len++) {
-        const p = pubkey.slice(0, len);
-        const arr = prefix.get(p);
-        if (arr) arr.push(c);
-        else prefix.set(p, [c]);
-      }
-      if (c.name && !name.has(c.name)) name.set(c.name, c);
-    }
-    return { prefixIndex: prefix, nameIndex: name };
-  }, [contacts]);
-
   // Self GPS
   const myLatLon = useMemo<[number, number] | null>(() => {
     if (!config || !isValidLocation(config.lat, config.lon)) return null;

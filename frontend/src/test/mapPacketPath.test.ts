@@ -42,12 +42,7 @@ function makeConfig(publicKey: string): RadioConfig {
     lon: -104.9,
     tx_power: 20,
     max_tx_power: 22,
-    radio: {
-      frequency: 915,
-      bandwidth: 250,
-      spreading_factor: 10,
-      coding_rate: 5,
-    },
+    radio: { freq: 915, bw: 250, sf: 10, cr: 5 },
     path_hash_mode: 1,
     path_hash_mode_supported: true,
   };
