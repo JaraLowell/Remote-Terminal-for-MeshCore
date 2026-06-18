@@ -222,7 +222,7 @@ export function useRealtimeAppState({
         setContacts((prev) => mergeContactIntoList(prev, contact));
       },
       onLocation: (location: LocationPayload) => {
-        if (!location.public_key || !Number.isFinite(location.heading)) return;
+        if (!location.public_key) return;
         setContacts((prev) => {
           const idx = prev.findIndex((c) => c.public_key === location.public_key);
           if (idx < 0) return prev;
@@ -232,8 +232,10 @@ export function useRealtimeAppState({
             lat: location.lat,
             lon: location.lon,
             is_tracker: true,
-            tracker_heading: location.heading,
           };
+          if (Number.isFinite(location.heading)) {
+            merged.tracker_heading = location.heading;
+          }
           if (location.name && !existing.tracker_name) {
             merged.tracker_name = location.name;
           }

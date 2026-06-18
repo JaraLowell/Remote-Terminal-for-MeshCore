@@ -33,7 +33,7 @@ export interface LocationPayload {
   lon: number;
   altitude: number;
   speed: number;
-  heading: number;
+  heading?: number | null;
   satellites: number;
   battery: number;
   timestamp: number;

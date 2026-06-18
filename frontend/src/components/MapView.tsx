@@ -32,6 +32,10 @@ import {
   MAP_LIVE_ANIMATION_WINDOW_SEC,
   shouldAnimateMapLivePacket,
 } from '../utils/mapLiveTraffic';
+import {
+  mergeTrackerTrailUpdates,
+  trackerTrailEntriesFromApi,
+} from '../utils/mapTrackerTrail';
 import { MapLivePacketFeed } from './MapLivePacketFeed';
 
 interface MapViewProps {
@@ -206,6 +210,8 @@ const PARTICLE_SHADOW_BLUR = 9;
 const MAX_MAP_PARTICLES = 200;
 const ROUTE_LINE_OPACITY = 0.32;
 const ROUTE_LINE_WEIGHT = 2;
+const TRACKER_MARKER_COLOR = '#c4b5fd';
+const TRACKER_MARKER_SCALE = 1.3;
 
 // --- Helpers ---
 
@@ -264,14 +270,14 @@ function makeRoleMarkerIcon(role: MapRoleKey, opacity: number, scale = 1): L.Div
 }
 
 function makeTrackerMarkerIcon(scale = 1, heading: number | null = null): L.DivIcon {
-  const size = Math.max(8, Math.round(28 * scale));
+  const size = Math.max(10, Math.round(28 * scale * TRACKER_MARKER_SCALE));
   const c = size / 2;
-  const dotR = Math.max(2, 3.5 * scale);
-  const arrowLen = Math.max(4, 8 * scale);
-  const arrowHalfW = Math.max(2, 3 * scale);
-  const color = '#0072B2';
+  const dotR = Math.max(2.5, 3.5 * scale * TRACKER_MARKER_SCALE);
+  const arrowLen = Math.max(5, 8 * scale * TRACKER_MARKER_SCALE);
+  const arrowHalfW = Math.max(2.5, 3 * scale * TRACKER_MARKER_SCALE);
+  const color = TRACKER_MARKER_COLOR;
   const stroke = '#1a1a1a';
-  const strokeW = Math.max(1, 1.5 * scale);
+  const strokeW = Math.max(1, 1.5 * scale * TRACKER_MARKER_SCALE);
 
   const dot = `<circle cx="${c}" cy="${c}" r="${dotR}" fill="${color}" stroke="${stroke}" stroke-width="${strokeW}"/>`;
 
@@ -810,30 +816,40 @@ export function MapView({
   // Tracker location history (movement trails)
   const [showTrails, setShowTrails] = useState(false);
   const [trackerTrails, setTrackerTrails] = useState<Map<string, LocationHistory[]>>(new Map());
+  const trackerTrailsReadyRef = useRef(false);
 
-  // Fetch tracker location history trails
+  // Load stored tracker history once when trails are enabled.
   useEffect(() => {
     if (!showTrails) {
       setTrackerTrails(new Map());
+      trackerTrailsReadyRef.current = false;
       return;
     }
 
+    let cancelled = false;
     api
       .getAllTrackerLocationHistory()
       .then((data) => {
-        const trails = new Map<string, LocationHistory[]>();
-        data.forEach(({ contact, history }) => {
-          if (history.length > 1) {
-            // Only include trails with 2+ points
-            trails.set(contact.public_key, history);
-          }
-        });
-        setTrackerTrails(trails);
+        if (cancelled) return;
+        const initial = trackerTrailEntriesFromApi(data);
+        setTrackerTrails(mergeTrackerTrailUpdates(initial, contacts));
+        trackerTrailsReadyRef.current = true;
       })
       .catch((err) => {
         console.error('Failed to fetch tracker location history:', err);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [showTrails]);
+
+  // Extend trails immediately when a tracker contact moves (LOCATION WS / contact upsert).
+  useEffect(() => {
+    if (!showTrails || !trackerTrailsReadyRef.current) return;
+
+    setTrackerTrails((prev) => mergeTrackerTrailUpdates(prev, contacts));
+  }, [contacts, showTrails]);
 
   // Self GPS
   const myLatLon = useMemo<[number, number] | null>(() => {
@@ -1203,19 +1219,21 @@ export function MapView({
 
           {/* Tracker movement trails (red polylines) */}
           {showTrails &&
-            Array.from(trackerTrails.entries()).map(([publicKey, history]) => (
-              <Polyline
-                key={`trail-${publicKey}`}
-                positions={history.map((h) => [h.lat, h.lon] as [number, number])}
-                pathOptions={{
-                  color: '#ef4444',
-                  weight: 4,
-                  opacity: 0.7,
-                  lineCap: 'round',
-                  lineJoin: 'round',
-                }}
-              />
-            ))}
+            Array.from(trackerTrails.entries()).map(([publicKey, history]) =>
+              history.length > 1 ? (
+                <Polyline
+                  key={`trail-${publicKey}`}
+                  positions={history.map((h) => [h.lat, h.lon] as [number, number])}
+                  pathOptions={{
+                    color: '#ef4444',
+                    weight: 4,
+                    opacity: 0.7,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                />
+              ) : null
+            )}
 
           <ContactMarkersLayer
             contacts={mappableContacts}
