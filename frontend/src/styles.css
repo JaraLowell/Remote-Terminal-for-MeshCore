@@ -78,7 +78,7 @@ body {
   gap: 0.05rem;
   font-size: 0.625rem;
   line-height: 1.1;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--foreground);
   text-shadow:
     0 0 2px var(--background),

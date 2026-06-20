@@ -15,7 +15,7 @@ import 'leaflet/dist/leaflet.css';
 import type { Channel, Contact, LocationHistory, RadioConfig, RawPacket } from '../types';
 import { api } from '../api';
 import { formatTime } from '../utils/messageParser';
-import { isValidLocation } from '../utils/pathUtils';
+import { calculateDistance, isValidLocation } from '../utils/pathUtils';
 import { CONTACT_TYPE_REPEATER, CONTACT_TYPE_ROOM } from '../types';
 import { getMarkerZoomScale } from '../utils/mapMarkerScale';
 import {
@@ -222,6 +222,7 @@ const ROUTE_LINE_OPACITY = 0.32;
 const ROUTE_LINE_WEIGHT = 2;
 const TRACKER_MARKER_COLOR = '#c4b5fd';
 const TRACKER_MARKER_SCALE = 1.6;
+const TRACKER_LABEL_MOVE_THRESHOLD_M = 50;
 
 // --- Helpers ---
 
@@ -442,6 +443,7 @@ function ContactMapMarker({
   resolveTrackerHeading,
   resolveTrackerAltitude,
   resolveTrackerSpeed,
+  shouldShowTrackerLabel,
   onMarkerRef,
 }: {
   contact: Contact;
@@ -450,6 +452,7 @@ function ContactMapMarker({
   resolveTrackerHeading: (contact: Contact) => number | null;
   resolveTrackerAltitude: (contact: Contact) => number | null;
   resolveTrackerSpeed: (contact: Contact) => number | null;
+  shouldShowTrackerLabel: (contact: Contact) => boolean;
   onMarkerRef: (key: string, ref: L.Marker | null) => void;
 }) {
   const markerRef = useRef<L.Marker | null>(null);
@@ -463,8 +466,9 @@ function ContactMapMarker({
   const trackerHeading = isTracker ? resolveTrackerHeading(contact) : null;
   const trackerAltitude = isTracker ? resolveTrackerAltitude(contact) : null;
   const trackerSpeed = isTracker ? resolveTrackerSpeed(contact) : null;
-  const altitudeLabel = isTracker ? formatTrackerAltitudeM(trackerAltitude) : null;
-  const speedLabel = isTracker ? formatTrackerSpeedKmh(trackerSpeed) : null;
+  const showTrackerLabel = isTracker && shouldShowTrackerLabel(contact);
+  const altitudeLabel = showTrackerLabel ? formatTrackerAltitudeM(trackerAltitude) : null;
+  const speedLabel = showTrackerLabel ? formatTrackerSpeedKmh(trackerSpeed) : null;
 
   const icon = useMemo(
     () =>
@@ -557,6 +561,7 @@ function ContactMarkersLayer({
   resolveTrackerHeading,
   resolveTrackerAltitude,
   resolveTrackerSpeed,
+  shouldShowTrackerLabel,
 }: {
   contacts: Contact[];
   focusedContact: Contact | null;
@@ -564,6 +569,7 @@ function ContactMarkersLayer({
   resolveTrackerHeading: (contact: Contact) => number | null;
   resolveTrackerAltitude: (contact: Contact) => number | null;
   resolveTrackerSpeed: (contact: Contact) => number | null;
+  shouldShowTrackerLabel: (contact: Contact) => boolean;
 }) {
   const markerScale = useMapMarkerScale();
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
@@ -605,6 +611,7 @@ function ContactMarkersLayer({
           resolveTrackerHeading={resolveTrackerHeading}
           resolveTrackerAltitude={resolveTrackerAltitude}
           resolveTrackerSpeed={resolveTrackerSpeed}
+          shouldShowTrackerLabel={shouldShowTrackerLabel}
           onMarkerRef={setMarkerRef}
         />
       ))}
@@ -911,6 +918,8 @@ export function MapView({
   const [showTrails, setShowTrails] = useState(false);
   const [trackerTrails, setTrackerTrails] = useState<Map<string, LocationHistory[]>>(new Map());
   const trackerTrailsReadyRef = useRef(false);
+  const trackerLastCoordsRef = useRef<Record<string, [number, number]>>({});
+  const [trackerLabelVisible, setTrackerLabelVisible] = useState<Record<string, boolean>>({});
 
   // Load stored tracker history once when trails are enabled.
   useEffect(() => {
@@ -944,6 +953,48 @@ export function MapView({
 
     setTrackerTrails((prev) => mergeTrackerTrailUpdates(prev, contacts));
   }, [contacts, showTrails]);
+
+  useEffect(() => {
+    setTrackerLabelVisible((prev) => {
+      const next: Record<string, boolean> = { ...prev };
+      const seen = new Set<string>();
+
+      for (const contact of contacts) {
+        if (!contact.is_tracker || !isValidLocation(contact.lat, contact.lon)) {
+          continue;
+        }
+        const key = contact.public_key;
+        seen.add(key);
+
+        const previous = trackerLastCoordsRef.current[key];
+        if (!previous) {
+          next[key] = false;
+          trackerLastCoordsRef.current[key] = [contact.lat!, contact.lon!];
+          continue;
+        }
+
+        const movedKm = calculateDistance(previous[0], previous[1], contact.lat!, contact.lon!);
+        next[key] = movedKm != null && movedKm * 1000 >= TRACKER_LABEL_MOVE_THRESHOLD_M;
+        trackerLastCoordsRef.current[key] = [contact.lat!, contact.lon!];
+      }
+
+      for (const key of Object.keys(trackerLastCoordsRef.current)) {
+        if (!seen.has(key)) {
+          delete trackerLastCoordsRef.current[key];
+          delete next[key];
+        }
+      }
+
+      return next;
+    });
+  }, [contacts]);
+
+  const shouldShowTrackerLabel = useCallback(
+    (contact: Contact): boolean => {
+      return contact.is_tracker && trackerLabelVisible[contact.public_key] === true;
+    },
+    [trackerLabelVisible]
+  );
 
   // Self GPS
   const myLatLon = useMemo<[number, number] | null>(() => {
@@ -1348,6 +1399,7 @@ export function MapView({
             resolveTrackerHeading={resolveTrackerHeading}
             resolveTrackerAltitude={resolveTrackerAltitude}
             resolveTrackerSpeed={resolveTrackerSpeed}
+            shouldShowTrackerLabel={shouldShowTrackerLabel}
           />
 
           {showPackets && <ParticleOverlay particles={particles} />}
