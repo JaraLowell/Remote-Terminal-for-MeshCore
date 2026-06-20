@@ -39,6 +39,31 @@ class SpamFloodEpisodeRepository:
         }
 
     @staticmethod
+    def _category_fields(*, category_counts: dict[str, int]) -> dict[str, Any]:
+        from app.services.spam_packet_timeline import primary_category_from_counts
+
+        return {
+            "primary_category": primary_category_from_counts(category_counts),
+            "category_counts_json": json.dumps(category_counts),
+        }
+
+    @staticmethod
+    def _parse_category_counts(raw: str | None) -> dict[str, int]:
+        if not raw:
+            return {}
+        parsed = json.loads(raw)
+        return {str(key): int(value) for key, value in parsed.items()}
+
+    @staticmethod
+    def _parse_category_labels(raw: str | None, counts: dict[str, int]) -> dict[str, str]:
+        if raw:
+            parsed = json.loads(raw)
+            return {str(key): str(value) for key, value in parsed.items()}
+        from app.services.spam_packet_timeline import CATEGORY_LABELS
+
+        return {key: CATEGORY_LABELS.get(key, key) for key in counts.keys()}
+
+    @staticmethod
     def _clusters_payload(clusters: list[SpamFloodCluster]) -> str:
         return json.dumps([cluster.model_dump() for cluster in clusters])
 
@@ -71,11 +96,15 @@ class SpamFloodEpisodeRepository:
         total_packets: int,
         peak_packets_per_window: int,
         clusters: list[SpamFloodCluster],
+        category_counts: dict[str, int] | None = None,
     ) -> None:
         primary = SpamFloodEpisodeRepository._primary_cluster_fields(clusters[0] if clusters else None)
+        categories = SpamFloodEpisodeRepository._category_fields(
+            category_counts=category_counts or {},
+        )
         async with db.tx() as conn:
             await conn.execute(
-                f"""
+                """
                 UPDATE spam_flood_episodes
                 SET
                     total_packets = ?,
@@ -88,6 +117,8 @@ class SpamFloodEpisodeRepository:
                     primary_origin_lon = ?,
                     primary_refined_route = ?,
                     primary_confidence = ?,
+                    primary_category = ?,
+                    category_counts_json = ?,
                     clusters_json = ?
                 WHERE id = ?
                 """,
@@ -102,6 +133,8 @@ class SpamFloodEpisodeRepository:
                     primary["primary_origin_lon"],
                     primary["primary_refined_route"],
                     primary["primary_confidence"],
+                    categories["primary_category"],
+                    categories["category_counts_json"],
                     SpamFloodEpisodeRepository._clusters_payload(clusters),
                     episode_id,
                 ),
@@ -117,6 +150,7 @@ class SpamFloodEpisodeRepository:
         peak_packets_per_window: int,
         baseline_packets_per_window: float | None,
         clusters: list[SpamFloodCluster],
+        category_counts: dict[str, int] | None = None,
     ) -> None:
         duration_secs = max(0, ended_at - started_at)
         anomaly_ratio = None
@@ -124,9 +158,12 @@ class SpamFloodEpisodeRepository:
             anomaly_ratio = peak_packets_per_window / baseline_packets_per_window
 
         primary = SpamFloodEpisodeRepository._primary_cluster_fields(clusters[0] if clusters else None)
+        categories = SpamFloodEpisodeRepository._category_fields(
+            category_counts=category_counts or {},
+        )
         async with db.tx() as conn:
             await conn.execute(
-                f"""
+                """
                 UPDATE spam_flood_episodes
                 SET
                     ended_at = ?,
@@ -143,6 +180,8 @@ class SpamFloodEpisodeRepository:
                     primary_origin_lon = ?,
                     primary_refined_route = ?,
                     primary_confidence = ?,
+                    primary_category = ?,
+                    category_counts_json = ?,
                     clusters_json = ?
                 WHERE id = ?
                 """,
@@ -161,6 +200,8 @@ class SpamFloodEpisodeRepository:
                     primary["primary_origin_lon"],
                     primary["primary_refined_route"],
                     primary["primary_confidence"],
+                    categories["primary_category"],
+                    categories["category_counts_json"],
                     SpamFloodEpisodeRepository._clusters_payload(clusters),
                     episode_id,
                 ),
@@ -187,6 +228,13 @@ class SpamFloodEpisodeRepository:
     def _row_to_model(row) -> SpamFloodEpisode:
         clusters_raw = json.loads(row["clusters_json"] or "[]")
         clusters = [SpamFloodCluster.model_validate(item) for item in clusters_raw]
+        category_counts = SpamFloodEpisodeRepository._parse_category_counts(
+            row["category_counts_json"] if "category_counts_json" in row.keys() else None
+        )
+        category_labels = SpamFloodEpisodeRepository._parse_category_labels(
+            row["category_labels_json"] if "category_labels_json" in row.keys() else None,
+            category_counts,
+        )
         return SpamFloodEpisode(
             id=row["id"],
             started_at=row["started_at"],
@@ -206,6 +254,9 @@ class SpamFloodEpisodeRepository:
             primary_origin_lon=row["primary_origin_lon"],
             primary_refined_route=row["primary_refined_route"],
             primary_confidence=row["primary_confidence"],
+            primary_category=row["primary_category"] if "primary_category" in row.keys() else None,
+            category_counts=category_counts,
+            category_labels=category_labels,
             clusters=clusters,
         )
 

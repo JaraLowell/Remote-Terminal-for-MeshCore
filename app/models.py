@@ -572,7 +572,7 @@ class SpamRouteStatsResponse(BaseModel):
 
 
 class SpamFloodCluster(BaseModel):
-    """A live clustered ingress hotspot for coordinated DM floods."""
+    """A live clustered ingress hotspot for coordinated packet floods."""
 
     entry_hop: str = Field(description="First RF hop identifier for this cluster")
     entry_name: str | None = Field(default=None, description="Resolved contact name when known")
@@ -665,7 +665,7 @@ class SpamLiveStatus(BaseModel):
     )
     baseline_packets_per_window: float | None = Field(
         default=None,
-        description="Historical average DM path observations per trigger window (14-day baseline)",
+        description="Historical average packet observations per trigger window (14-day baseline)",
     )
     anomaly_ratio: float | None = Field(
         default=None,
@@ -683,11 +683,23 @@ class SpamLiveStatus(BaseModel):
         default=False,
         description="True when displayed clusters are the last known snapshot, not a fresh match",
     )
+    primary_category: str | None = Field(
+        default=None,
+        description="Dominant packet category in the current episode (request, dm, advert, etc.)",
+    )
+    category_counts: dict[str, int] = Field(
+        default_factory=dict,
+        description="Packet counts by category for the current episode",
+    )
+    category_labels: dict[str, str] = Field(
+        default_factory=dict,
+        description="Human-readable labels for categories present in category_counts",
+    )
     clusters: list[SpamFloodCluster] = Field(default_factory=list)
 
 
 class SpamFloodEpisode(BaseModel):
-    """Persisted DM flood episode for post-hoc review."""
+    """Persisted packet flood episode for post-hoc review."""
 
     id: int
     started_at: int
@@ -707,6 +719,9 @@ class SpamFloodEpisode(BaseModel):
     primary_origin_lon: float | None = None
     primary_refined_route: str | None = None
     primary_confidence: int | None = None
+    primary_category: str | None = None
+    category_counts: dict[str, int] = Field(default_factory=dict)
+    category_labels: dict[str, str] = Field(default_factory=dict)
     clusters: list[SpamFloodCluster] = Field(default_factory=list)
 
 

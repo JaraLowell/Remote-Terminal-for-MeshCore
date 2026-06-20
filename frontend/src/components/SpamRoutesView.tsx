@@ -13,6 +13,10 @@ import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { SpamPacketTimelineSection } from './SpamPacketTimelineSection';
 import { cn } from '@/lib/utils';
+import {
+  formatSpamCategoryBreakdown,
+  spamCategoryLabel,
+} from '../utils/spamPacketCategories';
 
 type WindowOption = 1 | 6 | 24 | 72 | 168;
 
@@ -222,6 +226,22 @@ function buildMapUrl(lat: number, lon: number): string {
 function primaryEpisodeCluster(episode: SpamFloodEpisode): SpamFloodCluster | null {
   const clusters = episodeReportClusters(episode);
   return clusters[0] ?? null;
+}
+
+function formatEpisodeFloodType(episode: SpamFloodEpisode): string {
+  return formatSpamCategoryBreakdown(
+    episode.category_counts,
+    episode.category_labels,
+    episode.total_packets,
+  );
+}
+
+function formatLiveFloodType(live: SpamLiveStatus): string {
+  return formatSpamCategoryBreakdown(
+    live.category_counts,
+    live.category_labels,
+    live.episode_packets || live.total_packets,
+  );
 }
 
 function formatEpisodePrimaryNode(episode: SpamFloodEpisode): string {
@@ -638,7 +658,7 @@ function LiveFloodSection({ live }: { live: SpamLiveStatus | null }) {
           <div>
             <h3 className="text-sm font-semibold">Live Flood Monitor</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Watching the last {live.window_secs}s for {live.packet_threshold}+ DM path observations.
+              Watching the last {live.window_secs}s for {live.packet_threshold}+ packet observations.
             </p>
           </div>
           <div className="rounded bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
@@ -655,8 +675,12 @@ function LiveFloodSection({ live }: { live: SpamLiveStatus | null }) {
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />
           <div>
-            <h3 className="text-sm font-semibold text-destructive">Coordinated DM Flood Detected</h3>
+            <h3 className="text-sm font-semibold text-destructive">
+              {spamCategoryLabel(live.primary_category, live.category_labels)} Flood Detected
+            </h3>
             <p className="mt-1 text-xs text-destructive/90">
+              {formatLiveFloodType(live)}
+              {' · '}
               {live.episode_packets > 0
                 ? `${live.episode_packets} packets in episode`
                 : `${live.total_packets} packets`}
@@ -845,6 +869,10 @@ function FloodEpisodeDetailDialog({
             <div className="mt-1 text-sm">{inProgress ? 'In progress' : formatSeen(episode.ended_at)}</div>
           </div>
           <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+            <div className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">Flood type</div>
+            <div className="mt-1 text-sm">{formatEpisodeFloodType(episode)}</div>
+          </div>
+          <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
             <div className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">Duration</div>
             <div className="mt-1 text-sm tabular-nums">
               {inProgress ? '…' : formatDuration(episode.duration_secs)}
@@ -988,6 +1016,8 @@ function FloodEpisodeLogSection({
                   <EpisodeSummarySegment label="Pkts">{episode.total_packets}</EpisodeSummarySegment>
                   <span className="text-muted-foreground/50">·</span>
                   <EpisodeSummarySegment label="Peak">{episode.peak_packets_per_window}</EpisodeSummarySegment>
+                  <span className="text-muted-foreground/50">·</span>
+                  <EpisodeSummarySegment label="Type">{formatEpisodeFloodType(episode)}</EpisodeSummarySegment>
                   <span className="text-muted-foreground/50">·</span>
                   <EpisodeSummarySegment label="#1">{formatEpisodePrimaryNode(episode)}</EpisodeSummarySegment>
                   <span className="text-muted-foreground/50">·</span>

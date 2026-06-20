@@ -1,4 +1,4 @@
-"""Live DM flood detection with RF ingress clustering and gateway stripping."""
+"""Live packet flood detection with RF ingress clustering and gateway stripping."""
 
 from __future__ import annotations
 
@@ -19,6 +19,10 @@ from app.services.spam_flood_repeater_automation import schedule_spam_flood_repe
 from app.services.spam_gateway_filter import (
     gateway_pubkeys_from_configured,
     is_gateway_hop,
+)
+from app.services.spam_packet_timeline import (
+    CATEGORY_LABELS,
+    primary_category_from_counts,
 )
 from app.services.spam_path_analysis import (
     build_one_byte_geo_hint,
@@ -45,11 +49,12 @@ class _PacketRecord:
     timestamp: float
     entry_node: str
     full_rf_path: tuple[str, ...]
+    category: str
 
 
 @dataclass
 class SpamLiveTracker:
-    """Rolling-window DM flood tracker with multi-ingress clustering."""
+    """Rolling-window packet flood tracker with multi-ingress clustering."""
 
     spam_gateway_keys: str = ""
     window_secs: float = 30.0
@@ -137,32 +142,54 @@ class SpamLiveTracker:
             rf_only.append(hop)
         return rf_only
 
+    def observe_packet(
+        self,
+        *,
+        category: str,
+        path_hex: str | None,
+        path_len: int | None,
+        observed_at: int | float | None = None,
+    ) -> bool:
+        """Record a packet observation; return True when state may have changed."""
+        current_time = float(observed_at if observed_at is not None else time.time())
+        tokens = self._rf_path_tokens(path_hex or "", int(path_len or 0))
+        rf_only = self._strip_to_rf_path(tokens)
+
+        record = _PacketRecord(
+            timestamp=current_time,
+            entry_node=rf_only[0] if rf_only else "",
+            full_rf_path=tuple(rf_only),
+            category=category,
+        )
+        self._history.append(record)
+
+        was_active = self._active
+        self._sync_active_state(current_time)
+        if self._active:
+            if not was_active:
+                cutoff = current_time - self.window_secs
+                self._episode_packet_records = [
+                    existing for existing in self._history if existing.timestamp >= cutoff
+                ]
+            else:
+                self._episode_packet_records.append(record)
+        return self._should_broadcast(current_time, was_active)
+
     def observe_dm_path(
         self,
         *,
         path_hex: str | None,
         path_len: int | None,
         observed_at: int | float | None = None,
+        category: str = "dm",
     ) -> bool:
-        """Record a direct-message path observation; return True when state may have changed."""
-        tokens = self._rf_path_tokens(path_hex or "", int(path_len or 0))
-        rf_only = self._strip_to_rf_path(tokens)
-        if not rf_only:
-            return False
-
-        current_time = float(observed_at if observed_at is not None else time.time())
-        record = _PacketRecord(
-            timestamp=current_time,
-            entry_node=rf_only[0],
-            full_rf_path=tuple(rf_only),
+        """Backward-compatible alias for DM path observations."""
+        return self.observe_packet(
+            category=category,
+            path_hex=path_hex,
+            path_len=path_len,
+            observed_at=observed_at,
         )
-        self._history.append(record)
-        if self._detected_at is not None or self._episode_db_id is not None:
-            self._episode_packet_records.append(record)
-
-        was_active = self._active
-        self._sync_active_state(current_time)
-        return self._should_broadcast(current_time, was_active)
 
     def _episode_retention_horizon(self) -> float:
         configured = self.episode_retention_secs
@@ -297,9 +324,8 @@ class SpamLiveTracker:
         return clusters
 
     def _clustering_records(self) -> list[_PacketRecord]:
-        if self._episode_packet_records:
-            return list(self._episode_packet_records)
-        return list(self._history)
+        source = self._episode_packet_records if self._episode_packet_records else list(self._history)
+        return [record for record in source if record.full_rf_path]
 
     @staticmethod
     def _longest_path_tokens(
@@ -584,6 +610,24 @@ class SpamLiveTracker:
     def _focus_geo_clusters(self, clusters: list[SpamFloodCluster]) -> list[SpamFloodCluster]:
         return consolidate_geo_hotspots(clusters, max_clusters=self._max_report_clusters())
 
+    def _category_source_records(self) -> list[_PacketRecord]:
+        if self._episode_packet_records:
+            return list(self._episode_packet_records)
+        return list(self._history)
+
+    def _category_breakdown(self, records: list[_PacketRecord]) -> dict[str, int]:
+        return dict(Counter(record.category for record in records))
+
+    def _category_labels_for(self, counts: dict[str, int]) -> dict[str, str]:
+        return {key: CATEGORY_LABELS.get(key, key) for key in counts.keys()}
+
+    def _episode_category_state(self) -> tuple[str | None, dict[str, int], dict[str, str]]:
+        records = self._category_source_records()
+        counts = self._category_breakdown(records)
+        labels = self._category_labels_for(counts)
+        primary = primary_category_from_counts(counts)
+        return primary, counts, labels
+
     async def _build_status_async(
         self, current_time: float, clusters: list[dict[str, Any]]
     ) -> SpamLiveStatus:
@@ -613,6 +657,8 @@ class SpamLiveTracker:
                 2,
             )
 
+        primary_category, category_counts, category_labels = self._episode_category_state()
+
         return SpamLiveStatus(
             active=self._active,
             window_secs=int(self.window_secs),
@@ -628,6 +674,9 @@ class SpamLiveTracker:
             episode_id=self._episode_db_id,
             cluster_min_share=self.cluster_min_ratio,
             clusters_stale=clusters_stale,
+            primary_category=primary_category,
+            category_counts=category_counts,
+            category_labels=category_labels,
             clusters=enriched_clusters,
         )
 
@@ -687,7 +736,9 @@ class SpamLiveTracker:
         self._episode_open = True
         self._repeater_automation_armed = True
         self._episode_started_at = int(self._detected_at or current_time)
-        self._episode_total_packets = 1
+        self._episode_total_packets = len(self._episode_packet_records) or self._trigger_window_count(
+            current_time
+        )
         schedule_spam_flood_repeater_commands("start")
         self._ensure_episode_watchdog()
 
@@ -755,12 +806,14 @@ class SpamLiveTracker:
             enriched = self._focus_geo_clusters(await self._enrich_clusters(cluster_raw))
             self._update_episode_peak_clusters(enriched)
             self._episode_last_clusters = self._episode_peak_clusters_display()
+        _, category_counts, _ = self._episode_category_state()
         try:
             await SpamFloodEpisodeRepository.update_progress(
                 episode_id=self._episode_db_id,
                 total_packets=self._episode_total_packets,
                 peak_packets_per_window=self._episode_peak_window,
                 clusters=self._episode_last_clusters,
+                category_counts=category_counts,
             )
         except Exception:
             logger.exception("Failed to update spam flood episode %s", self._episode_db_id)
@@ -785,6 +838,8 @@ class SpamLiveTracker:
             final_clusters = self._apply_report_limit_models(self._episode_last_clusters)
         else:
             final_clusters = []
+
+        primary_category, category_counts, category_labels = self._episode_category_state()
 
         try:
             if episode_id is not None:
@@ -811,6 +866,7 @@ class SpamLiveTracker:
                         peak_packets_per_window=self._episode_peak_window,
                         baseline_packets_per_window=self._episode_baseline,
                         clusters=final_clusters,
+                        category_counts=category_counts,
                     )
         except Exception:
             logger.exception("Failed to finalize spam flood episode %s", episode_id)
@@ -822,14 +878,16 @@ class SpamLiveTracker:
     async def observe_and_maybe_alert(
         self,
         *,
+        category: str = "dm",
         path_hex: str | None,
         path_len: int | None,
         observed_at: int | float | None = None,
     ) -> SpamLiveStatus | None:
-        """Observe a DM path and return enriched status when an alert should fire."""
+        """Observe a packet and return enriched status when an alert should fire."""
         current_time = float(observed_at if observed_at is not None else time.time())
         was_active = self._active
-        should_broadcast = self.observe_dm_path(
+        should_broadcast = self.observe_packet(
+            category=category,
             path_hex=path_hex,
             path_len=path_len,
             observed_at=observed_at,
@@ -840,13 +898,13 @@ class SpamLiveTracker:
                 self._open_flood_episode(current_time)
                 await self._start_episode(current_time)
             else:
-                self._episode_total_packets += 1
                 self._episode_peak_window = max(
                     self._episode_peak_window,
                     self._trigger_window_count(current_time),
                 )
-                if self._episode_db_id is not None:
-                    self._schedule_episode_progress()
+            self._episode_total_packets = len(self._episode_packet_records)
+            if self._episode_db_id is not None:
+                self._schedule_episode_progress()
 
         if was_active and not self._active:
             await self._end_episode(current_time)

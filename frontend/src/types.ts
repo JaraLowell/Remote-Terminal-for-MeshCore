@@ -451,6 +451,9 @@ export interface SpamLiveStatus {
   episode_id: number | null;
   cluster_min_share: number;
   clusters_stale: boolean;
+  primary_category: string | null;
+  category_counts: Record<string, number>;
+  category_labels: Record<string, string>;
   clusters: SpamFloodCluster[];
 }
 
@@ -473,6 +476,9 @@ export interface SpamFloodEpisode {
   primary_origin_lon: number | null;
   primary_refined_route: string | null;
   primary_confidence: number | null;
+  primary_category: string | null;
+  category_counts: Record<string, number>;
+  category_labels: Record<string, string>;
   clusters: SpamFloodCluster[];
 }
 

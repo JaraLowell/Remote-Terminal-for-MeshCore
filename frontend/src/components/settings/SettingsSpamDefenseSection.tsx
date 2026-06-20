@@ -173,7 +173,7 @@ export function SettingsSpamDefenseSection({
         <div>
           <h3 className="text-base font-semibold tracking-tight">Live Flood Detection</h3>
           <p className="mt-1 text-[0.8125rem] text-muted-foreground">
-            Tune how aggressively RemoteTerm detects and reports DM flood episodes. Changes apply
+            Tune how aggressively RemoteTerm detects and reports packet flood episodes. Changes apply
             immediately without restarting the server.
           </p>
         </div>
@@ -310,7 +310,7 @@ export function SettingsSpamDefenseSection({
                 onChange={(event) => setFlukeMaxPackets(event.target.value)}
               />
               <p className="text-[0.8125rem] text-muted-foreground">
-                Episodes with fewer total DM paths are not saved to history. 0 disables this filter.
+                Episodes with fewer total packets are not saved to history. 0 disables this filter.
               </p>
             </div>
             <div className="space-y-2">

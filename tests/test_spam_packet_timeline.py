@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.database import db
+import time
+
 from app.services.spam_packet_timeline import (
     CATEGORY_LABELS,
     classify_packet_header,
@@ -39,7 +40,7 @@ def test_classify_packet_header_maps_common_payload_types():
 @pytest.mark.asyncio
 async def test_spam_packet_timeline_buckets_last_24h(test_db):
     now = 1_700_100_000
-    async with db.tx() as conn:
+    async with test_db.tx() as conn:
         await conn.execute(
             "INSERT INTO raw_packets (timestamp, data) VALUES (?, ?)",
             (now - 1800, bytes([_header(0x00, 0x02)] + [0] * 8)),
@@ -69,8 +70,8 @@ async def test_spam_packet_timeline_buckets_last_24h(test_db):
 
 @pytest.mark.asyncio
 async def test_spam_packet_timeline_endpoint(client, test_db):
-    now = 1_700_200_000
-    async with db.tx() as conn:
+    now = int(time.time())
+    async with test_db.tx() as conn:
         await conn.execute(
             "INSERT INTO raw_packets (timestamp, data) VALUES (?, ?)",
             (now - 300, bytes([_header(0x01, 0x08)] + [0] * 8)),

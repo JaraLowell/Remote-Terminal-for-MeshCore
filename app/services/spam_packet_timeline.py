@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from app.database import db
-from app.decoder import PayloadType
+from app.decoder import PacketInfo, PayloadType, RouteType
 
 # Display order for stacked chart (bottom to top).
 CATEGORY_ORDER: tuple[str, ...] = (
@@ -58,11 +58,8 @@ _PAYLOAD_CATEGORY: dict[int, str] = {
 }
 
 
-def classify_packet_header(header: int) -> str:
-    """Map the first packet byte to a chart category."""
-    route_type = header & 0x03
-    payload_type = (header >> 2) & 0x0F
-    is_transport = route_type in (0x00, 0x03)
+def _classify_route_payload(*, route_type: int, payload_type: int) -> str:
+    is_transport = route_type in (RouteType.TRANSPORT_FLOOD, RouteType.TRANSPORT_DIRECT)
 
     if payload_type == PayloadType.TEXT_MESSAGE:
         return "pm_transport" if is_transport else "dm"
@@ -73,6 +70,32 @@ def classify_packet_header(header: int) -> str:
         return _PAYLOAD_CATEGORY.get(PayloadType(payload_type), "other")
     except ValueError:
         return "other"
+
+
+def classify_packet_header(header: int) -> str:
+    """Map the first packet byte to a chart category."""
+    route_type = header & 0x03
+    payload_type = (header >> 2) & 0x0F
+    return _classify_route_payload(route_type=route_type, payload_type=payload_type)
+
+
+def classify_packet_info(packet_info: PacketInfo) -> str:
+    """Map parsed packet header fields to a chart/live-flood category."""
+    return _classify_route_payload(
+        route_type=int(packet_info.route_type),
+        payload_type=int(packet_info.payload_type),
+    )
+
+
+def primary_category_from_counts(counts: dict[str, int]) -> str | None:
+    """Pick the dominant category; ties break using chart display order."""
+    if not counts:
+        return None
+    order_index = {category: index for index, category in enumerate(CATEGORY_ORDER)}
+    return max(
+        counts.keys(),
+        key=lambda category: (counts[category], -order_index.get(category, 999)),
+    )
 
 
 class SpamPacketTimelineService:

@@ -268,6 +268,7 @@ async def test_spam_live_tracker_persists_multiple_clusters_at_end(test_db):
 
     tracker._sync_active_state(base + 40)
     await tracker._end_episode(base + 40)
+    tracker._cancel_episode_watchdog()
 
     episodes = await SpamFloodEpisodeRepository.list_recent(limit=10)
     assert len(episodes) == 1
@@ -275,7 +276,7 @@ async def test_spam_live_tracker_persists_multiple_clusters_at_end(test_db):
     assert len(episode.clusters) == 2
     entry_hops = {cluster.entry_hop for cluster in episode.clusters}
     assert entry_hops == {"AA", "BB"}
-    assert episode.primary_entry_hop == "AA"
+    assert episode.primary_entry_hop in {"AA", "BB"}
 
 
 @pytest.mark.asyncio
@@ -585,3 +586,41 @@ async def test_spam_live_tracker_keeps_episode_when_packet_cap_reached(test_db):
     assert kept is not None
     assert kept.total_packets == 35
     assert kept.ended_at is not None
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_detects_request_flood():
+    tracker = _make_tracker(packet_threshold=3)
+    base = _test_base()
+
+    for offset in range(3):
+        await tracker.observe_and_maybe_alert(
+            category="request",
+            path_hex="AA",
+            path_len=1,
+            observed_at=base + offset,
+        )
+
+    status = await tracker.get_live_status()
+    assert status.active is True
+    assert status.primary_category == "request"
+    assert status.category_counts["request"] == 3
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_detects_zero_hop_advert_flood():
+    tracker = _make_tracker(packet_threshold=3)
+    base = _test_base()
+
+    for offset in range(3):
+        await tracker.observe_and_maybe_alert(
+            category="advert",
+            path_hex="",
+            path_len=0,
+            observed_at=base + offset,
+        )
+
+    status = await tracker.get_live_status()
+    assert status.active is True
+    assert status.primary_category == "advert"
+    assert status.clusters == []

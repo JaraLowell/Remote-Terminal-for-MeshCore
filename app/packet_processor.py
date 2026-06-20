@@ -68,21 +68,17 @@ _raw_observation_counter = count(1)
 
 
 async def _maybe_track_live_spam_flood(packet_info: PacketInfo | None, timestamp: int) -> None:
-    """Feed DM path observations into the live spam flood tracker."""
+    """Feed all packet observations into the live spam flood tracker."""
     if packet_info is None:
         return
-    if packet_info.payload_type not in {PayloadType.TEXT_MESSAGE, PayloadType.RESPONSE}:
-        return
 
-    path_hex = packet_info.path.hex() if packet_info.path else ""
-    path_len = packet_info.path_length
-    if not path_hex or path_len <= 0:
-        return
+    from app.services.spam_packet_timeline import classify_packet_info
 
     try:
         status = await spam_live_tracker.observe_and_maybe_alert(
-            path_hex=path_hex,
-            path_len=path_len,
+            category=classify_packet_info(packet_info),
+            path_hex=packet_info.path.hex() if packet_info.path else "",
+            path_len=packet_info.path_length,
             observed_at=timestamp,
         )
         if status is not None:

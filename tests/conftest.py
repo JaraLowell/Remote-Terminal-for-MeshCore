@@ -62,13 +62,19 @@ async def test_db():
     import app.database as database_module
     import app.packet_processor as packet_processor_module
     import app.routers.packets as packets_module
+    import app.services.spam_baseline as spam_baseline_module
+    import app.services.spam_packet_timeline as spam_packet_timeline_module
 
     original_database_db = database_module.db
     original_packets_db = packets_module.db
     original_packet_processor_db = packet_processor_module.db
+    original_spam_baseline_db = spam_baseline_module.db
+    original_spam_packet_timeline_db = spam_packet_timeline_module.db
     database_module.db = db
     packets_module.db = db
     packet_processor_module.db = db
+    spam_baseline_module.db = db
+    spam_packet_timeline_module.db = db
 
     try:
         yield db
@@ -78,6 +84,8 @@ async def test_db():
         database_module.db = original_database_db
         packets_module.db = original_packets_db
         packet_processor_module.db = original_packet_processor_db
+        spam_baseline_module.db = original_spam_baseline_db
+        spam_packet_timeline_module.db = original_spam_packet_timeline_db
         await db.disconnect()
 
 
