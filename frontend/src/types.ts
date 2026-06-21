@@ -436,6 +436,8 @@ export interface SpamFloodCluster {
   origin_geo_hint?: string | null;
   last_seen: number;
   cluster_mode: string | null;
+  flood_source_key?: string | null;
+  flood_source_label?: string | null;
 }
 
 export interface SpamLiveStatus {
@@ -464,6 +466,10 @@ export interface SpamLiveStatus {
   likely_source_traffic_share: number | null;
   likely_source_packet_count: number | null;
   likely_source_kind: string | null;
+  source_filter_active?: boolean;
+  source_filter_mode?: string | null;
+  source_filter_excluded_packets?: number;
+  source_filter_labels?: string[];
   clusters: SpamFloodCluster[];
 }
 

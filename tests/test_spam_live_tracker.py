@@ -704,3 +704,70 @@ async def test_spam_live_tracker_likely_source_geo_hint_within_20km(test_db):
     assert status.likely_source_geo_hint is not None
     assert "Possibly from" in status.likely_source_geo_hint
     assert "Orinen" in status.likely_source_geo_hint
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_filters_side_traffic_by_dominant_sender(test_db):
+    tracker = _make_tracker(packet_threshold=8, cluster_min_ratio=0.15, gateway_pubkeys=frozenset())
+    base = _test_base()
+
+    for offset in range(6):
+        tracker.observe_packet(
+            category="request",
+            path_hex="AA" + "BB" + "CC",
+            path_len=3,
+            observed_at=base + offset,
+            source_key="hash1:F0",
+            source_label="F0",
+        )
+    for offset in range(6, 8):
+        tracker.observe_packet(
+            category="request",
+            path_hex="ZZ" + "YY",
+            path_len=2,
+            observed_at=base + offset,
+            source_key="hash1:99",
+            source_label="99",
+        )
+
+    status = await tracker.get_live_status()
+    assert status.source_filter_active is True
+    assert status.source_filter_mode == "single"
+    assert status.source_filter_labels == ["F0"]
+    assert status.source_filter_excluded_packets == 2
+    assert len(status.clusters) >= 1
+    assert all(cluster.flood_source_label == "F0" for cluster in status.clusters)
+    assert all("AA" in cluster.dominant_route for cluster in status.clusters)
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_splits_dual_sender_floods(test_db):
+    tracker = _make_tracker(packet_threshold=8, cluster_min_ratio=0.15, gateway_pubkeys=frozenset())
+    base = _test_base()
+
+    for offset in range(6):
+        tracker.observe_packet(
+            category="request",
+            path_hex="AA11",
+            path_len=2,
+            observed_at=base + offset,
+            source_key="hash1:F0",
+            source_label="F0",
+        )
+    for offset in range(6, 12):
+        tracker.observe_packet(
+            category="request",
+            path_hex="BB22",
+            path_len=2,
+            observed_at=base + offset,
+            source_key="hash1:A1",
+            source_label="A1",
+        )
+
+    status = await tracker.get_live_status()
+    assert status.source_filter_active is True
+    assert status.source_filter_mode == "multi"
+    assert set(status.source_filter_labels) == {"F0", "A1"}
+    labels = {cluster.flood_source_label for cluster in status.clusters}
+    assert labels <= {"F0", "A1"}
+    assert len(labels) == 2

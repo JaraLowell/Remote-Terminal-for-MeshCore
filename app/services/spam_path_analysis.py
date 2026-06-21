@@ -14,6 +14,10 @@ DEFAULT_GEO_MERGE_RADIUS_KM = 35.0
 DEFAULT_ONE_BYTE_GEO_MATCH_KM = 75.0
 DEFAULT_LIKELY_SOURCE_GEO_MATCH_KM = 20.0
 DEFAULT_LIKELY_SOURCE_MIN_SHARE = 0.5
+DEFAULT_MULTI_SOURCE_MIN_SHARE = 0.25
+DEFAULT_MULTI_SOURCE_COMBINED_SHARE = 0.85
+DEFAULT_ROTATION_MIN_UNIQUE = 4
+DEFAULT_ROTATION_MAX_TOP_SHARE = 0.35
 
 RecordT = TypeVar("RecordT")
 ClusterT = TypeVar("ClusterT")
@@ -178,6 +182,101 @@ def detect_dominant_path_source(
         packet_count=narrowed.packet_count,
         traffic_share=narrowed.traffic_share,
         kind="path",
+    )
+
+
+@dataclass(frozen=True)
+class SourceFilterPlan:
+    """How episode path clustering should narrow by packet sender identity."""
+
+    mode: str  # none, single, multi, rotating
+    sources: tuple[DominantSourceCandidate, ...] = ()
+    excluded_packets: int = 0
+
+
+def _dominant_source_candidate_from_key(key: str, count: int, total: int) -> DominantSourceCandidate:
+    label = key.split(":", 1)[-1]
+    if key.startswith("hash1:"):
+        label = key.split(":", 1)[1]
+    elif len(key) >= 12:
+        label = key[:12]
+    return DominantSourceCandidate(
+        source_key=key,
+        source_label=label,
+        packet_count=count,
+        traffic_share=count / total if total else 0.0,
+        kind="packet",
+    )
+
+
+def is_rotating_sender_identity(
+    source_keys: list[str | None],
+    *,
+    min_share: float = DEFAULT_LIKELY_SOURCE_MIN_SHARE,
+    min_unique: int = DEFAULT_ROTATION_MIN_UNIQUE,
+    max_top_share: float = DEFAULT_ROTATION_MAX_TOP_SHARE,
+) -> bool:
+    """True when many distinct sender keys appear with no stable dominant identity."""
+    keyed = [key for key in source_keys if key]
+    if len(keyed) < min_unique:
+        return False
+
+    counts = Counter(keyed)
+    top_count = counts.most_common(1)[0][1]
+    top_share = top_count / len(keyed)
+    unique = len(counts)
+    if unique >= min_unique and top_share < min_share:
+        return True
+    if unique >= len(keyed) * 0.35 and top_share < max_top_share:
+        return True
+    return False
+
+
+def build_source_filter_plan(
+    source_keys: list[str | None],
+    *,
+    min_share: float = DEFAULT_LIKELY_SOURCE_MIN_SHARE,
+    min_count: int = 3,
+    multi_min_share: float = DEFAULT_MULTI_SOURCE_MIN_SHARE,
+    multi_combined_share: float = DEFAULT_MULTI_SOURCE_COMBINED_SHARE,
+    max_sources: int = 2,
+) -> SourceFilterPlan:
+    """Plan sender-focused filtering for flood path clustering and reports."""
+    keyed = [key for key in source_keys if key]
+    total = len(keyed)
+    if total == 0:
+        return SourceFilterPlan(mode="none")
+
+    if is_rotating_sender_identity(source_keys, min_share=min_share):
+        return SourceFilterPlan(mode="rotating")
+
+    counts = Counter(keyed)
+    ranked = counts.most_common(max_sources + 1)
+    top_key, top_count = ranked[0]
+    top_share = top_count / total
+    if top_count < min_count or top_share < min_share:
+        return SourceFilterPlan(mode="none")
+
+    primary = _dominant_source_candidate_from_key(top_key, top_count, total)
+    if len(ranked) >= 2:
+        second_key, second_count = ranked[1]
+        second_share = second_count / total
+        if (
+            second_count >= min_count
+            and second_share >= multi_min_share
+            and (top_share + second_share) >= multi_combined_share
+        ):
+            secondary = _dominant_source_candidate_from_key(second_key, second_count, total)
+            return SourceFilterPlan(
+                mode="multi",
+                sources=(primary, secondary),
+                excluded_packets=total - top_count - second_count,
+            )
+
+    return SourceFilterPlan(
+        mode="single",
+        sources=(primary,),
+        excluded_packets=total - top_count,
     )
 
 

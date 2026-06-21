@@ -639,6 +639,14 @@ class SpamFloodCluster(BaseModel):
         default=None,
         description="narrowed, partitioned, entry_fallback, geo_merged, or sticky when cluster confidence is degraded",
     )
+    flood_source_key: str | None = Field(
+        default=None,
+        description="Packet sender identity key when clustering was scoped to a dominant from hash",
+    )
+    flood_source_label: str | None = Field(
+        default=None,
+        description="Short display label for flood_source_key (for example a 1-byte hash)",
+    )
 
 
 class SpamLiveStatus(BaseModel):
@@ -725,6 +733,22 @@ class SpamLiveStatus(BaseModel):
     likely_source_kind: str | None = Field(
         default=None,
         description="packet when derived from payload sender identity, path when from shared RF prefix",
+    )
+    source_filter_active: bool = Field(
+        default=False,
+        description="True when path clustering ignored side traffic from other sender identities",
+    )
+    source_filter_mode: str | None = Field(
+        default=None,
+        description="none, single, multi, or rotating sender filter mode for episode clustering",
+    )
+    source_filter_excluded_packets: int = Field(
+        default=0,
+        description="RF-path packets excluded from clustering because they did not match the flood sender filter",
+    )
+    source_filter_labels: list[str] = Field(
+        default_factory=list,
+        description="Short sender labels included in the active filter (for example F0)",
     )
     clusters: list[SpamFloodCluster] = Field(default_factory=list)
 

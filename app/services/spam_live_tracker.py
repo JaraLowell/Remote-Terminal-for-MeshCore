@@ -27,6 +27,7 @@ from app.services.spam_packet_timeline import (
 from app.services.spam_path_analysis import (
     build_one_byte_geo_hint,
     build_possibly_from_geo_hint,
+    build_source_filter_plan,
     cluster_confidence,
     consolidate_geo_hotspots,
     contact_has_valid_coords,
@@ -40,6 +41,7 @@ from app.services.spam_path_analysis import (
     pick_nearest_coords_to_point,
     split_entry_partitioned_clusters,
     split_path_clusters,
+    SourceFilterPlan,
     DEFAULT_LIKELY_SOURCE_GEO_MATCH_KM,
     DEFAULT_LIKELY_SOURCE_MIN_SHARE,
     DEFAULT_ONE_BYTE_GEO_MATCH_KM,
@@ -94,6 +96,7 @@ class SpamLiveTracker:
     _episode_packet_records: list[_PacketRecord] = field(default_factory=list, init=False)
     _episode_peak_clusters: dict[str, SpamFloodCluster] = field(default_factory=dict, init=False)
     _episode_likely_source: dict[str, Any] | None = field(default=None, init=False)
+    _episode_source_filter: SourceFilterPlan | None = field(default=None, init=False)
     _episode_open: bool = field(default=False, init=False)
     _repeater_automation_armed: bool = field(default=False, init=False)
     _episode_watchdog_task: asyncio.Task[None] | None = field(default=None, init=False)
@@ -336,9 +339,51 @@ class SpamLiveTracker:
         )
         return clusters
 
+    def _episode_records(self) -> list[_PacketRecord]:
+        if self._episode_packet_records:
+            return list(self._episode_packet_records)
+        return list(self._history)
+
+    def _source_filter_plan(self, records: list[_PacketRecord]) -> SourceFilterPlan:
+        plan = build_source_filter_plan(
+            [record.source_key for record in records],
+            min_share=DEFAULT_LIKELY_SOURCE_MIN_SHARE,
+            min_count=self._likely_source_min_count(),
+        )
+        if plan.mode not in {"single", "multi"}:
+            return plan
+
+        allowed = {source.source_key for source in plan.sources}
+        excluded = sum(
+            1
+            for record in records
+            if record.full_rf_path and record.source_key not in allowed
+        )
+        return SourceFilterPlan(
+            mode=plan.mode,
+            sources=plan.sources,
+            excluded_packets=excluded,
+        )
+
+    @staticmethod
+    def _records_for_source_filter(
+        records: list[_PacketRecord],
+        plan: SourceFilterPlan,
+    ) -> list[_PacketRecord]:
+        with_path = [record for record in records if record.full_rf_path]
+        if plan.mode == "single" and plan.sources:
+            allowed = plan.sources[0].source_key
+            return [record for record in with_path if record.source_key == allowed]
+        if plan.mode == "multi":
+            allowed = {source.source_key for source in plan.sources}
+            return [record for record in with_path if record.source_key in allowed]
+        return with_path
+
     def _clustering_records(self) -> list[_PacketRecord]:
-        source = self._episode_packet_records if self._episode_packet_records else list(self._history)
-        return [record for record in source if record.full_rf_path]
+        records = self._episode_records()
+        plan = self._source_filter_plan(records)
+        self._episode_source_filter = plan
+        return self._records_for_source_filter(records, plan)
 
     @staticmethod
     def _longest_path_tokens(
@@ -467,7 +512,33 @@ class SpamLiveTracker:
         return self._fallback_entry_clusters_from(records)
 
     def _cluster_packets(self) -> list[dict[str, Any]]:
-        return self._cluster_packets_from(self._clustering_records())
+        records = self._episode_records()
+        plan = self._source_filter_plan(records)
+        self._episode_source_filter = plan
+
+        if plan.mode == "multi":
+            clusters: list[dict[str, Any]] = []
+            per_source_limit = max(1, self._max_report_clusters() // len(plan.sources))
+            for source in plan.sources:
+                subset = [
+                    record
+                    for record in records
+                    if record.full_rf_path and record.source_key == source.source_key
+                ]
+                for cluster in self._cluster_packets_from(subset)[:per_source_limit]:
+                    cluster["flood_source_key"] = source.source_key
+                    cluster["flood_source_label"] = source.source_label
+                    clusters.append(cluster)
+            return self._apply_report_limit(clusters)
+
+        filtered = self._records_for_source_filter(records, plan)
+        clusters = self._cluster_packets_from(filtered)
+        if plan.mode == "single" and plan.sources:
+            source = plan.sources[0]
+            for cluster in clusters:
+                cluster["flood_source_key"] = source.source_key
+                cluster["flood_source_label"] = source.source_label
+        return clusters
 
     async def get_live_status(self) -> SpamLiveStatus:
         current_time = time.time()
@@ -616,6 +687,8 @@ class SpamLiveTracker:
                     origin_geo_hint=origin_geo_hint,
                     last_seen=int(cluster["last_seen"]),
                     cluster_mode=cluster.get("cluster_mode"),
+                    flood_source_key=cluster.get("flood_source_key"),
+                    flood_source_label=cluster.get("flood_source_label"),
                 )
             )
         return enriched_clusters
@@ -624,9 +697,11 @@ class SpamLiveTracker:
         return consolidate_geo_hotspots(clusters, max_clusters=self._max_report_clusters())
 
     def _category_source_records(self) -> list[_PacketRecord]:
-        if self._episode_packet_records:
-            return list(self._episode_packet_records)
-        return list(self._history)
+        records = self._episode_records()
+        plan = self._episode_source_filter or self._source_filter_plan(records)
+        if plan.mode in {"single", "multi"}:
+            return self._records_for_source_filter(records, plan)
+        return records
 
     def _category_breakdown(self, records: list[_PacketRecord]) -> dict[str, int]:
         return dict(Counter(record.category for record in records))
@@ -803,6 +878,22 @@ class SpamLiveTracker:
             "likely_source_kind": None,
         }
 
+    def _source_filter_fields(self) -> dict[str, Any]:
+        plan = self._episode_source_filter
+        if plan is None or plan.mode in {"none", "rotating"}:
+            return {
+                "source_filter_active": False,
+                "source_filter_mode": plan.mode if plan is not None else None,
+                "source_filter_excluded_packets": 0,
+                "source_filter_labels": [],
+            }
+        return {
+            "source_filter_active": True,
+            "source_filter_mode": plan.mode,
+            "source_filter_excluded_packets": plan.excluded_packets,
+            "source_filter_labels": [source.source_label for source in plan.sources],
+        }
+
     def _likely_source_fields(self) -> dict[str, Any]:
         if self._episode_likely_source:
             return dict(self._episode_likely_source)
@@ -861,6 +952,7 @@ class SpamLiveTracker:
             primary_category=primary_category,
             category_counts=category_counts,
             category_labels=category_labels,
+            **self._source_filter_fields(),
             **likely_source,
             clusters=enriched_clusters,
         )
@@ -978,6 +1070,7 @@ class SpamLiveTracker:
         self._episode_packet_records = []
         self._episode_peak_clusters = {}
         self._episode_likely_source = None
+        self._episode_source_filter = None
 
     def _schedule_episode_progress(self) -> None:
         if self._episode_db_id is None:
@@ -987,7 +1080,7 @@ class SpamLiveTracker:
     async def _persist_episode_progress(self) -> None:
         if self._episode_db_id is None:
             return
-        cluster_raw = self._cluster_packets_from(self._episode_packet_records)
+        cluster_raw = self._cluster_packets()
         if cluster_raw:
             enriched = self._focus_geo_clusters(await self._enrich_clusters(cluster_raw))
             self._update_episode_peak_clusters(enriched)
@@ -1016,7 +1109,7 @@ class SpamLiveTracker:
         ended_at = int(current_time)
         duration_secs = max(0, ended_at - started_at)
         total_packets = self._episode_total_packets
-        cluster_raw = self._cluster_packets_from(self._episode_packet_records)
+        cluster_raw = self._cluster_packets()
         if cluster_raw:
             final_clusters = self._focus_geo_clusters(await self._enrich_clusters(cluster_raw))
             self._update_episode_peak_clusters(final_clusters)
