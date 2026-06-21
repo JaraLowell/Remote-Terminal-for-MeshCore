@@ -624,3 +624,83 @@ async def test_spam_live_tracker_detects_zero_hop_advert_flood():
     assert status.active is True
     assert status.primary_category == "advert"
     assert status.clusters == []
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_identifies_stable_packet_source(test_db):
+    await ContactRepository.upsert(
+        ContactUpsert(
+            public_key="aa" + "11" * 31,
+            name="Request Spammer",
+            type=1,
+        )
+    )
+
+    tracker = _make_tracker(packet_threshold=3)
+    base = _test_base()
+
+    for offset in range(4):
+        await tracker.observe_and_maybe_alert(
+            category="request",
+            path_hex="AA11",
+            path_len=1,
+            observed_at=base + offset,
+            source_key="hash1:AA",
+            source_label="AA",
+        )
+
+    status = await tracker.get_live_status()
+    assert status.likely_source_key == "hash1:AA"
+    assert status.likely_source_name == "Request Spammer"
+    assert status.likely_source_kind == "packet"
+    assert status.likely_source_packet_count == 4
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_likely_source_geo_hint_within_20km(test_db):
+    await ContactRepository.upsert(
+        ContactUpsert(
+            public_key="f611" + "aa" * 30,
+            name="Orinen",
+            type=2,
+            lat=52.0,
+            lon=4.0,
+        )
+    )
+    await ContactRepository.upsert(
+        ContactUpsert(
+            public_key="f611" + "bb" * 30,
+            name="FarAway",
+            type=2,
+            lat=60.0,
+            lon=10.0,
+        )
+    )
+    await ContactRepository.upsert(
+        ContactUpsert(
+            public_key="aa11" + "33" * 31,
+            name="City-Repeater",
+            type=2,
+            lat=52.05,
+            lon=4.05,
+        )
+    )
+
+    tracker = _make_tracker(packet_threshold=3, gateway_pubkeys=frozenset())
+    base = _test_base()
+
+    for offset in range(4):
+        await tracker.observe_and_maybe_alert(
+            category="request",
+            path_hex="F611AA11",
+            path_len=2,
+            observed_at=base + offset,
+            source_key="hash1:F6",
+            source_label="F6",
+        )
+
+    status = await tracker.get_live_status()
+    assert status.likely_source_key == "hash1:F6"
+    assert status.likely_source_geo_hint is not None
+    assert "Possibly from" in status.likely_source_geo_hint
+    assert "Orinen" in status.likely_source_geo_hint

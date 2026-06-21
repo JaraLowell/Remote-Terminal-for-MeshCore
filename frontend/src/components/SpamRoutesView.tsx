@@ -17,6 +17,10 @@ import {
   formatSpamCategoryBreakdown,
   spamCategoryLabel,
 } from '../utils/spamPacketCategories';
+import {
+  formatEpisodeLocationSummary as formatEpisodeLocSummary,
+  resolveEpisodeLocationCoords,
+} from '../utils/spamEpisodeLocation';
 
 type WindowOption = 1 | 6 | 24 | 72 | 168;
 
@@ -244,6 +248,87 @@ function formatLiveFloodType(live: SpamLiveStatus): string {
   );
 }
 
+function formatLikelySourceSummary(
+  source: Pick<
+    SpamLiveStatus,
+    | 'likely_source_key'
+    | 'likely_source_label'
+    | 'likely_source_name'
+    | 'likely_source_geo_hint'
+    | 'likely_source_traffic_share'
+    | 'likely_source_packet_count'
+    | 'likely_source_kind'
+  >,
+): string | null {
+  if (!source.likely_source_key) return null;
+  if (source.likely_source_geo_hint) return source.likely_source_geo_hint;
+  if (source.likely_source_name && source.likely_source_label) {
+    return `${source.likely_source_name} (${source.likely_source_label})`;
+  }
+  return source.likely_source_label ?? source.likely_source_key;
+}
+
+function LikelySourceBanner({
+  source,
+}: {
+  source: Pick<
+    SpamLiveStatus,
+    | 'likely_source_key'
+    | 'likely_source_label'
+    | 'likely_source_name'
+    | 'likely_source_geo_hint'
+    | 'likely_source_traffic_share'
+    | 'likely_source_packet_count'
+    | 'likely_source_kind'
+    | 'likely_source_lat'
+    | 'likely_source_lon'
+  >;
+}) {
+  const summary = formatLikelySourceSummary(source);
+  if (!summary) return null;
+
+  const share =
+    source.likely_source_traffic_share != null
+      ? formatPercent(source.likely_source_traffic_share)
+      : null;
+  const coords =
+    source.likely_source_lat != null && source.likely_source_lon != null
+      ? `${source.likely_source_lat.toFixed(5)}, ${source.likely_source_lon.toFixed(5)}`
+      : null;
+
+  return (
+    <div className="rounded-md border border-destructive/40 bg-background/90 px-3 py-2">
+      <div className="text-[0.625rem] font-semibold uppercase tracking-wider text-destructive">
+        Likely spam source
+      </div>
+      <div className="mt-1 text-sm font-medium text-foreground">{summary}</div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {source.likely_source_kind === 'packet'
+          ? 'Same packet sender identity on most flood packets'
+          : 'Same shared RF path prefix on most flood packets'}
+        {share ? ` · ${share} of identified traffic` : ''}
+        {source.likely_source_packet_count != null
+          ? ` · ${source.likely_source_packet_count} pkts`
+          : ''}
+      </div>
+      {coords && (
+        <a
+          href={buildMapUrl(source.likely_source_lat!, source.likely_source_lon!)}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-flex items-center gap-1 font-mono text-[0.6875rem] text-primary hover:underline"
+        >
+          {coords}
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </a>
+      )}
+      <div className="mt-1 text-[0.8125rem] text-muted-foreground">
+        Ingress hotspot analysis below still shows where traffic enters the mesh.
+      </div>
+    </div>
+  );
+}
+
 function formatEpisodePrimaryNode(episode: SpamFloodEpisode): string {
   const cluster = primaryEpisodeCluster(episode);
   if (cluster) {
@@ -256,26 +341,8 @@ function formatEpisodePrimaryNode(episode: SpamFloodEpisode): string {
   return '-';
 }
 
-function episodeLocationCoords(
-  cluster: SpamFloodCluster | null,
-  episode: SpamFloodEpisode,
-): { lat: number; lon: number } | null {
-  const lat = cluster?.origin_lat ?? cluster?.lat ?? episode.primary_origin_lat;
-  const lon = cluster?.origin_lon ?? cluster?.lon ?? episode.primary_origin_lon;
-  if (lat == null || lon == null) return null;
-  return { lat, lon };
-}
-
 function formatEpisodeLocationSummary(episode: SpamFloodEpisode): string {
-  const cluster = primaryEpisodeCluster(episode);
-  const coords = episodeLocationCoords(cluster, episode);
-  if (coords) {
-    return `${coords.lat.toFixed(3)}, ${coords.lon.toFixed(3)}`;
-  }
-  if (cluster?.origin_geo_hint) {
-    return cluster.origin_geo_hint;
-  }
-  return 'Unknown';
+  return formatEpisodeLocSummary(episode, episodeReportClusters(episode));
 }
 
 function EpisodeSummarySegment({ label, children }: { label: string; children: ReactNode }) {
@@ -700,6 +767,8 @@ function LiveFloodSection({ live }: { live: SpamLiveStatus | null }) {
         </div>
       </div>
 
+      <LikelySourceBanner source={live} />
+
       {live.clusters.length === 0 ? (
         <p className="text-xs text-destructive/90">
           Flood volume is high, but no ingress hop reached the minimum share yet (
@@ -845,7 +914,7 @@ function FloodEpisodeDetailDialog({
 
   const reportClusters = episodeReportClusters(episode);
   const inProgress = episode.ended_at == null;
-  const coords = episodeLocationCoords(primaryEpisodeCluster(episode), episode);
+  const coords = resolveEpisodeLocationCoords(episode, reportClusters);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -872,6 +941,16 @@ function FloodEpisodeDetailDialog({
             <div className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">Flood type</div>
             <div className="mt-1 text-sm">{formatEpisodeFloodType(episode)}</div>
           </div>
+          {episode.likely_source_key && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 sm:col-span-2">
+              <div className="text-[0.625rem] uppercase tracking-wider text-destructive">
+                Likely spam source
+              </div>
+              <div className="mt-1 text-sm font-medium">
+                {formatLikelySourceSummary(episode) ?? episode.likely_source_label}
+              </div>
+            </div>
+          )}
           <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
             <div className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">Duration</div>
             <div className="mt-1 text-sm tabular-nums">
@@ -1018,6 +1097,14 @@ function FloodEpisodeLogSection({
                   <EpisodeSummarySegment label="Peak">{episode.peak_packets_per_window}</EpisodeSummarySegment>
                   <span className="text-muted-foreground/50">·</span>
                   <EpisodeSummarySegment label="Type">{formatEpisodeFloodType(episode)}</EpisodeSummarySegment>
+                  {episode.likely_source_key && (
+                    <>
+                      <span className="text-muted-foreground/50">·</span>
+                      <EpisodeSummarySegment label="From">
+                        {formatLikelySourceSummary(episode) ?? episode.likely_source_label}
+                      </EpisodeSummarySegment>
+                    </>
+                  )}
                   <span className="text-muted-foreground/50">·</span>
                   <EpisodeSummarySegment label="#1">{formatEpisodePrimaryNode(episode)}</EpisodeSummarySegment>
                   <span className="text-muted-foreground/50">·</span>

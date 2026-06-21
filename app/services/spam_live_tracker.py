@@ -26,16 +26,22 @@ from app.services.spam_packet_timeline import (
 )
 from app.services.spam_path_analysis import (
     build_one_byte_geo_hint,
+    build_possibly_from_geo_hint,
     cluster_confidence,
     consolidate_geo_hotspots,
     contact_has_valid_coords,
+    detect_dominant_packet_source,
+    detect_dominant_path_source,
     estimate_origin_geo,
     format_route,
+    geo_weighted_centroid,
     hop_suspect_score,
     nearest_named_chain_landmark,
     pick_nearest_coords_to_point,
     split_entry_partitioned_clusters,
     split_path_clusters,
+    DEFAULT_LIKELY_SOURCE_GEO_MATCH_KM,
+    DEFAULT_LIKELY_SOURCE_MIN_SHARE,
     DEFAULT_ONE_BYTE_GEO_MATCH_KM,
 )
 
@@ -50,6 +56,8 @@ class _PacketRecord:
     entry_node: str
     full_rf_path: tuple[str, ...]
     category: str
+    source_key: str | None = None
+    source_label: str | None = None
 
 
 @dataclass
@@ -85,6 +93,7 @@ class SpamLiveTracker:
     _episode_last_clusters: list[SpamFloodCluster] = field(default_factory=list, init=False)
     _episode_packet_records: list[_PacketRecord] = field(default_factory=list, init=False)
     _episode_peak_clusters: dict[str, SpamFloodCluster] = field(default_factory=dict, init=False)
+    _episode_likely_source: dict[str, Any] | None = field(default=None, init=False)
     _episode_open: bool = field(default=False, init=False)
     _repeater_automation_armed: bool = field(default=False, init=False)
     _episode_watchdog_task: asyncio.Task[None] | None = field(default=None, init=False)
@@ -149,6 +158,8 @@ class SpamLiveTracker:
         path_hex: str | None,
         path_len: int | None,
         observed_at: int | float | None = None,
+        source_key: str | None = None,
+        source_label: str | None = None,
     ) -> bool:
         """Record a packet observation; return True when state may have changed."""
         current_time = float(observed_at if observed_at is not None else time.time())
@@ -160,6 +171,8 @@ class SpamLiveTracker:
             entry_node=rf_only[0] if rf_only else "",
             full_rf_path=tuple(rf_only),
             category=category,
+            source_key=source_key,
+            source_label=source_label,
         )
         self._history.append(record)
 
@@ -628,6 +641,173 @@ class SpamLiveTracker:
         primary = primary_category_from_counts(counts)
         return primary, counts, labels
 
+    def _likely_source_min_count(self) -> int:
+        return max(3, self._min_cluster_size())
+
+    def _detect_likely_source_candidate(self, records: list[_PacketRecord]):
+        min_count = self._likely_source_min_count()
+        packet_candidate = detect_dominant_packet_source(
+            [record.source_key for record in records],
+            min_share=DEFAULT_LIKELY_SOURCE_MIN_SHARE,
+            min_count=min_count,
+        )
+        if packet_candidate is not None:
+            return packet_candidate
+        return detect_dominant_path_source(
+            [record.full_rf_path for record in records if record.full_rf_path],
+            min_share=DEFAULT_LIKELY_SOURCE_MIN_SHARE,
+            min_count=min_count,
+        )
+
+    async def _resolve_likely_source(
+        self,
+        candidate,
+        *,
+        ref_lat: float | None,
+        ref_lon: float | None,
+    ) -> dict[str, Any]:
+        hop = candidate.source_label
+        if candidate.source_key.startswith("path:"):
+            hop = candidate.source_key.split(":", 1)[1]
+
+        resolved_name: str | None = None
+        resolved_public_key: str | None = None
+        resolved_lat: float | None = None
+        resolved_lon: float | None = None
+        geo_hint: str | None = None
+
+        lookup_key = candidate.source_key
+        if lookup_key.startswith("hash1:"):
+            hop = lookup_key.split(":", 1)[1]
+            contact = await ContactRepository.get_by_key_prefix(hop)
+            if contact is not None:
+                resolved_name = contact.name
+                resolved_public_key = contact.public_key
+                if contact_has_valid_coords(contact.lat, contact.lon):
+                    resolved_lat = float(contact.lat)
+                    resolved_lon = float(contact.lon)
+            elif ref_lat is not None and ref_lon is not None:
+                candidates = await ContactRepository.list_geo_by_key_prefix(hop)
+                candidate_points = [
+                    (item, float(item.lat), float(item.lon))
+                    for item in candidates
+                    if contact_has_valid_coords(item.lat, item.lon)
+                ]
+                nearest = pick_nearest_coords_to_point(candidate_points, ref_lat, ref_lon)
+                if nearest is not None:
+                    contact, distance_km = nearest
+                    if distance_km <= DEFAULT_LIKELY_SOURCE_GEO_MATCH_KM:
+                        resolved_name = contact.name
+                        resolved_public_key = contact.public_key
+                        resolved_lat = float(contact.lat)
+                        resolved_lon = float(contact.lon)
+                        geo_hint = build_possibly_from_geo_hint(
+                            contact.name or hop,
+                            hop,
+                            distance_km,
+                        )
+        elif lookup_key.startswith("path:"):
+            if hop_allows_prefix_name_lookup(hop):
+                contact = await ContactRepository.get_by_key_prefix(hop)
+                if contact is not None:
+                    resolved_name = contact.name
+                    resolved_public_key = contact.public_key
+                    if contact_has_valid_coords(contact.lat, contact.lon):
+                        resolved_lat = float(contact.lat)
+                        resolved_lon = float(contact.lon)
+                elif ref_lat is not None and ref_lon is not None:
+                    candidates = await ContactRepository.list_geo_by_key_prefix(hop)
+                    candidate_points = [
+                        (item, float(item.lat), float(item.lon))
+                        for item in candidates
+                        if contact_has_valid_coords(item.lat, item.lon)
+                    ]
+                    nearest = pick_nearest_coords_to_point(candidate_points, ref_lat, ref_lon)
+                    if nearest is not None:
+                        contact, distance_km = nearest
+                        if distance_km <= DEFAULT_LIKELY_SOURCE_GEO_MATCH_KM:
+                            resolved_name = contact.name
+                            resolved_public_key = contact.public_key
+                            resolved_lat = float(contact.lat)
+                            resolved_lon = float(contact.lon)
+                            geo_hint = build_possibly_from_geo_hint(
+                                contact.name or hop,
+                                hop,
+                                distance_km,
+                            )
+        else:
+            contact = await ContactRepository.get_by_key_prefix(lookup_key[:12])
+            if contact is None and len(lookup_key) >= 64:
+                contact = await ContactRepository.get_by_key(lookup_key)
+            if contact is not None:
+                resolved_name = contact.name
+                resolved_public_key = contact.public_key
+                if contact_has_valid_coords(contact.lat, contact.lon):
+                    resolved_lat = float(contact.lat)
+                    resolved_lon = float(contact.lon)
+
+        return {
+            "likely_source_key": candidate.source_key,
+            "likely_source_label": candidate.source_label,
+            "likely_source_name": resolved_name,
+            "likely_source_public_key": resolved_public_key,
+            "likely_source_lat": resolved_lat,
+            "likely_source_lon": resolved_lon,
+            "likely_source_geo_hint": geo_hint,
+            "likely_source_traffic_share": round(candidate.traffic_share, 4),
+            "likely_source_packet_count": candidate.packet_count,
+            "likely_source_kind": candidate.kind,
+        }
+
+    async def _refresh_likely_source(self, clusters: list[SpamFloodCluster]) -> dict[str, Any]:
+        records = self._category_source_records()
+        candidate = self._detect_likely_source_candidate(records)
+        if candidate is None:
+            self._episode_likely_source = None
+            return self._empty_likely_source_fields()
+
+        centroid = geo_weighted_centroid(clusters)
+        ref_lat = centroid[0] if centroid is not None else None
+        ref_lon = centroid[1] if centroid is not None else None
+        if ref_lat is None or ref_lon is None:
+            for record in records:
+                if not record.full_rf_path:
+                    continue
+                hop_geos = await self._lookup_prefix_geos(list(record.full_rf_path[:3]))
+                origin = estimate_origin_geo(record.full_rf_path, hop_geos)
+                if origin is not None and origin.lat is not None and origin.lon is not None:
+                    ref_lat = origin.lat
+                    ref_lon = origin.lon
+                    break
+
+        resolved = await self._resolve_likely_source(
+            candidate,
+            ref_lat=ref_lat,
+            ref_lon=ref_lon,
+        )
+        self._episode_likely_source = resolved
+        return resolved
+
+    @staticmethod
+    def _empty_likely_source_fields() -> dict[str, Any]:
+        return {
+            "likely_source_key": None,
+            "likely_source_label": None,
+            "likely_source_name": None,
+            "likely_source_public_key": None,
+            "likely_source_lat": None,
+            "likely_source_lon": None,
+            "likely_source_geo_hint": None,
+            "likely_source_traffic_share": None,
+            "likely_source_packet_count": None,
+            "likely_source_kind": None,
+        }
+
+    def _likely_source_fields(self) -> dict[str, Any]:
+        if self._episode_likely_source:
+            return dict(self._episode_likely_source)
+        return self._empty_likely_source_fields()
+
     async def _build_status_async(
         self, current_time: float, clusters: list[dict[str, Any]]
     ) -> SpamLiveStatus:
@@ -658,6 +838,10 @@ class SpamLiveTracker:
             )
 
         primary_category, category_counts, category_labels = self._episode_category_state()
+        if self._active:
+            likely_source = await self._refresh_likely_source(enriched_clusters)
+        else:
+            likely_source = self._empty_likely_source_fields()
 
         return SpamLiveStatus(
             active=self._active,
@@ -677,6 +861,7 @@ class SpamLiveTracker:
             primary_category=primary_category,
             category_counts=category_counts,
             category_labels=category_labels,
+            **likely_source,
             clusters=enriched_clusters,
         )
 
@@ -792,6 +977,7 @@ class SpamLiveTracker:
         self._episode_last_clusters = []
         self._episode_packet_records = []
         self._episode_peak_clusters = {}
+        self._episode_likely_source = None
 
     def _schedule_episode_progress(self) -> None:
         if self._episode_db_id is None:
@@ -806,7 +992,9 @@ class SpamLiveTracker:
             enriched = self._focus_geo_clusters(await self._enrich_clusters(cluster_raw))
             self._update_episode_peak_clusters(enriched)
             self._episode_last_clusters = self._episode_peak_clusters_display()
+            await self._refresh_likely_source(self._episode_last_clusters)
         _, category_counts, _ = self._episode_category_state()
+        likely_source = self._likely_source_fields()
         try:
             await SpamFloodEpisodeRepository.update_progress(
                 episode_id=self._episode_db_id,
@@ -814,6 +1002,7 @@ class SpamLiveTracker:
                 peak_packets_per_window=self._episode_peak_window,
                 clusters=self._episode_last_clusters,
                 category_counts=category_counts,
+                likely_source=likely_source,
             )
         except Exception:
             logger.exception("Failed to update spam flood episode %s", self._episode_db_id)
@@ -840,6 +1029,9 @@ class SpamLiveTracker:
             final_clusters = []
 
         primary_category, category_counts, category_labels = self._episode_category_state()
+        likely_source = self._likely_source_fields()
+        if likely_source.get("likely_source_key") is None and final_clusters:
+            likely_source = await self._refresh_likely_source(final_clusters)
 
         try:
             if episode_id is not None:
@@ -867,6 +1059,7 @@ class SpamLiveTracker:
                         baseline_packets_per_window=self._episode_baseline,
                         clusters=final_clusters,
                         category_counts=category_counts,
+                        likely_source=likely_source,
                     )
         except Exception:
             logger.exception("Failed to finalize spam flood episode %s", episode_id)
@@ -882,6 +1075,8 @@ class SpamLiveTracker:
         path_hex: str | None,
         path_len: int | None,
         observed_at: int | float | None = None,
+        source_key: str | None = None,
+        source_label: str | None = None,
     ) -> SpamLiveStatus | None:
         """Observe a packet and return enriched status when an alert should fire."""
         current_time = float(observed_at if observed_at is not None else time.time())
@@ -891,6 +1086,8 @@ class SpamLiveTracker:
             path_hex=path_hex,
             path_len=path_len,
             observed_at=observed_at,
+            source_key=source_key,
+            source_label=source_label,
         )
 
         if self._active:

@@ -68,6 +68,22 @@ class SpamFloodEpisodeRepository:
         return json.dumps([cluster.model_dump() for cluster in clusters])
 
     @staticmethod
+    def _likely_source_fields(likely_source: dict[str, Any] | None) -> dict[str, Any]:
+        source = likely_source or {}
+        return {
+            "likely_source_key": source.get("likely_source_key"),
+            "likely_source_label": source.get("likely_source_label"),
+            "likely_source_name": source.get("likely_source_name"),
+            "likely_source_public_key": source.get("likely_source_public_key"),
+            "likely_source_lat": source.get("likely_source_lat"),
+            "likely_source_lon": source.get("likely_source_lon"),
+            "likely_source_geo_hint": source.get("likely_source_geo_hint"),
+            "likely_source_traffic_share": source.get("likely_source_traffic_share"),
+            "likely_source_packet_count": source.get("likely_source_packet_count"),
+            "likely_source_kind": source.get("likely_source_kind"),
+        }
+
+    @staticmethod
     async def create_started(
         *,
         started_at: int,
@@ -97,11 +113,13 @@ class SpamFloodEpisodeRepository:
         peak_packets_per_window: int,
         clusters: list[SpamFloodCluster],
         category_counts: dict[str, int] | None = None,
+        likely_source: dict[str, Any] | None = None,
     ) -> None:
         primary = SpamFloodEpisodeRepository._primary_cluster_fields(clusters[0] if clusters else None)
         categories = SpamFloodEpisodeRepository._category_fields(
             category_counts=category_counts or {},
         )
+        source_fields = SpamFloodEpisodeRepository._likely_source_fields(likely_source)
         async with db.tx() as conn:
             await conn.execute(
                 """
@@ -119,6 +137,16 @@ class SpamFloodEpisodeRepository:
                     primary_confidence = ?,
                     primary_category = ?,
                     category_counts_json = ?,
+                    likely_source_key = ?,
+                    likely_source_label = ?,
+                    likely_source_name = ?,
+                    likely_source_public_key = ?,
+                    likely_source_lat = ?,
+                    likely_source_lon = ?,
+                    likely_source_geo_hint = ?,
+                    likely_source_traffic_share = ?,
+                    likely_source_packet_count = ?,
+                    likely_source_kind = ?,
                     clusters_json = ?
                 WHERE id = ?
                 """,
@@ -135,6 +163,16 @@ class SpamFloodEpisodeRepository:
                     primary["primary_confidence"],
                     categories["primary_category"],
                     categories["category_counts_json"],
+                    source_fields["likely_source_key"],
+                    source_fields["likely_source_label"],
+                    source_fields["likely_source_name"],
+                    source_fields["likely_source_public_key"],
+                    source_fields["likely_source_lat"],
+                    source_fields["likely_source_lon"],
+                    source_fields["likely_source_geo_hint"],
+                    source_fields["likely_source_traffic_share"],
+                    source_fields["likely_source_packet_count"],
+                    source_fields["likely_source_kind"],
                     SpamFloodEpisodeRepository._clusters_payload(clusters),
                     episode_id,
                 ),
@@ -151,6 +189,7 @@ class SpamFloodEpisodeRepository:
         baseline_packets_per_window: float | None,
         clusters: list[SpamFloodCluster],
         category_counts: dict[str, int] | None = None,
+        likely_source: dict[str, Any] | None = None,
     ) -> None:
         duration_secs = max(0, ended_at - started_at)
         anomaly_ratio = None
@@ -161,6 +200,7 @@ class SpamFloodEpisodeRepository:
         categories = SpamFloodEpisodeRepository._category_fields(
             category_counts=category_counts or {},
         )
+        source_fields = SpamFloodEpisodeRepository._likely_source_fields(likely_source)
         async with db.tx() as conn:
             await conn.execute(
                 """
@@ -182,6 +222,16 @@ class SpamFloodEpisodeRepository:
                     primary_confidence = ?,
                     primary_category = ?,
                     category_counts_json = ?,
+                    likely_source_key = ?,
+                    likely_source_label = ?,
+                    likely_source_name = ?,
+                    likely_source_public_key = ?,
+                    likely_source_lat = ?,
+                    likely_source_lon = ?,
+                    likely_source_geo_hint = ?,
+                    likely_source_traffic_share = ?,
+                    likely_source_packet_count = ?,
+                    likely_source_kind = ?,
                     clusters_json = ?
                 WHERE id = ?
                 """,
@@ -202,6 +252,16 @@ class SpamFloodEpisodeRepository:
                     primary["primary_confidence"],
                     categories["primary_category"],
                     categories["category_counts_json"],
+                    source_fields["likely_source_key"],
+                    source_fields["likely_source_label"],
+                    source_fields["likely_source_name"],
+                    source_fields["likely_source_public_key"],
+                    source_fields["likely_source_lat"],
+                    source_fields["likely_source_lon"],
+                    source_fields["likely_source_geo_hint"],
+                    source_fields["likely_source_traffic_share"],
+                    source_fields["likely_source_packet_count"],
+                    source_fields["likely_source_kind"],
                     SpamFloodEpisodeRepository._clusters_payload(clusters),
                     episode_id,
                 ),
@@ -257,6 +317,24 @@ class SpamFloodEpisodeRepository:
             primary_category=row["primary_category"] if "primary_category" in row.keys() else None,
             category_counts=category_counts,
             category_labels=category_labels,
+            likely_source_key=row["likely_source_key"] if "likely_source_key" in row.keys() else None,
+            likely_source_label=row["likely_source_label"] if "likely_source_label" in row.keys() else None,
+            likely_source_name=row["likely_source_name"] if "likely_source_name" in row.keys() else None,
+            likely_source_public_key=(
+                row["likely_source_public_key"] if "likely_source_public_key" in row.keys() else None
+            ),
+            likely_source_lat=row["likely_source_lat"] if "likely_source_lat" in row.keys() else None,
+            likely_source_lon=row["likely_source_lon"] if "likely_source_lon" in row.keys() else None,
+            likely_source_geo_hint=(
+                row["likely_source_geo_hint"] if "likely_source_geo_hint" in row.keys() else None
+            ),
+            likely_source_traffic_share=(
+                row["likely_source_traffic_share"] if "likely_source_traffic_share" in row.keys() else None
+            ),
+            likely_source_packet_count=(
+                row["likely_source_packet_count"] if "likely_source_packet_count" in row.keys() else None
+            ),
+            likely_source_kind=row["likely_source_kind"] if "likely_source_kind" in row.keys() else None,
             clusters=clusters,
         )
 

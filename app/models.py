@@ -695,6 +695,37 @@ class SpamLiveStatus(BaseModel):
         default_factory=dict,
         description="Human-readable labels for categories present in category_counts",
     )
+    likely_source_key: str | None = Field(
+        default=None,
+        description="Stable packet sender identity when one source dominates the episode",
+    )
+    likely_source_label: str | None = Field(
+        default=None,
+        description="Short display label for likely_source_key (for example a 1-byte hash)",
+    )
+    likely_source_name: str | None = Field(
+        default=None,
+        description="Resolved contact name for the likely spam source when known",
+    )
+    likely_source_public_key: str | None = Field(
+        default=None,
+        description="Resolved full public key for the likely spam source when known",
+    )
+    likely_source_lat: float | None = Field(default=None)
+    likely_source_lon: float | None = Field(default=None)
+    likely_source_geo_hint: str | None = Field(
+        default=None,
+        description="Geo disambiguation hint such as 'Possibly from City-Repeater'",
+    )
+    likely_source_traffic_share: float | None = Field(
+        default=None,
+        description="Share of source-identified packets attributed to likely_source_key",
+    )
+    likely_source_packet_count: int | None = Field(default=None)
+    likely_source_kind: str | None = Field(
+        default=None,
+        description="packet when derived from payload sender identity, path when from shared RF prefix",
+    )
     clusters: list[SpamFloodCluster] = Field(default_factory=list)
 
 
@@ -722,6 +753,16 @@ class SpamFloodEpisode(BaseModel):
     primary_category: str | None = None
     category_counts: dict[str, int] = Field(default_factory=dict)
     category_labels: dict[str, str] = Field(default_factory=dict)
+    likely_source_key: str | None = None
+    likely_source_label: str | None = None
+    likely_source_name: str | None = None
+    likely_source_public_key: str | None = None
+    likely_source_lat: float | None = None
+    likely_source_lon: float | None = None
+    likely_source_geo_hint: str | None = None
+    likely_source_traffic_share: float | None = None
+    likely_source_packet_count: int | None = None
+    likely_source_kind: str | None = None
     clusters: list[SpamFloodCluster] = Field(default_factory=list)
 
 

@@ -454,6 +454,16 @@ export interface SpamLiveStatus {
   primary_category: string | null;
   category_counts: Record<string, number>;
   category_labels: Record<string, string>;
+  likely_source_key: string | null;
+  likely_source_label: string | null;
+  likely_source_name: string | null;
+  likely_source_public_key: string | null;
+  likely_source_lat: number | null;
+  likely_source_lon: number | null;
+  likely_source_geo_hint?: string | null;
+  likely_source_traffic_share: number | null;
+  likely_source_packet_count: number | null;
+  likely_source_kind: string | null;
   clusters: SpamFloodCluster[];
 }
 
@@ -479,6 +489,16 @@ export interface SpamFloodEpisode {
   primary_category: string | null;
   category_counts: Record<string, number>;
   category_labels: Record<string, string>;
+  likely_source_key: string | null;
+  likely_source_label: string | null;
+  likely_source_name: string | null;
+  likely_source_public_key: string | null;
+  likely_source_lat: number | null;
+  likely_source_lon: number | null;
+  likely_source_geo_hint?: string | null;
+  likely_source_traffic_share: number | null;
+  likely_source_packet_count: number | null;
+  likely_source_kind: string | null;
   clusters: SpamFloodCluster[];
 }
 

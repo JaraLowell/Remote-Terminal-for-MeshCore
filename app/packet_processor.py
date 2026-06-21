@@ -72,14 +72,18 @@ async def _maybe_track_live_spam_flood(packet_info: PacketInfo | None, timestamp
     if packet_info is None:
         return
 
+    from app.services.spam_packet_source import extract_packet_source
     from app.services.spam_packet_timeline import classify_packet_info
 
+    source = extract_packet_source(packet_info)
     try:
         status = await spam_live_tracker.observe_and_maybe_alert(
             category=classify_packet_info(packet_info),
             path_hex=packet_info.path.hex() if packet_info.path else "",
             path_len=packet_info.path_length,
             observed_at=timestamp,
+            source_key=source.source_key if source else None,
+            source_label=source.source_label if source else None,
         )
         if status is not None:
             broadcast_event("spam_flood_alert", status.model_dump())

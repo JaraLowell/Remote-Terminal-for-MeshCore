@@ -12,6 +12,8 @@ DEFAULT_MAX_HOP_DISTANCE_KM = 10.0
 DEFAULT_TOP_HOTSPOTS = 5
 DEFAULT_GEO_MERGE_RADIUS_KM = 35.0
 DEFAULT_ONE_BYTE_GEO_MATCH_KM = 75.0
+DEFAULT_LIKELY_SOURCE_GEO_MATCH_KM = 20.0
+DEFAULT_LIKELY_SOURCE_MIN_SHARE = 0.5
 
 RecordT = TypeVar("RecordT")
 ClusterT = TypeVar("ClusterT")
@@ -104,6 +106,79 @@ def build_one_byte_geo_hint(
             f"(~{rounded_km} km from estimated source)"
         )
     return f"{name} ({hop}) is ~{rounded_km} km from the estimated source"
+
+
+def build_possibly_from_geo_hint(name: str, hop: str, distance_km: float) -> str:
+    """Human-readable hint when a 1-byte hop is geo-matched near a known repeater."""
+    rounded_km = max(1, int(round(distance_km)))
+    return f"Possibly from {name} ({hop}, ~{rounded_km} km from nearby repeater)"
+
+
+@dataclass(frozen=True)
+class DominantSourceCandidate:
+    """A sender identity that stays constant across most of a flood episode."""
+
+    source_key: str
+    source_label: str
+    packet_count: int
+    traffic_share: float
+    kind: str  # "packet" or "path"
+
+
+def detect_dominant_packet_source(
+    source_keys: list[str | None],
+    *,
+    min_share: float = DEFAULT_LIKELY_SOURCE_MIN_SHARE,
+    min_count: int = 3,
+) -> DominantSourceCandidate | None:
+    """Pick a packet-level sender when the same source key dominates the episode."""
+    keyed = [key for key in source_keys if key]
+    if not keyed:
+        return None
+
+    counts = Counter(keyed)
+    top_key, top_count = counts.most_common(1)[0]
+    share = top_count / len(keyed)
+    if top_count < min_count or share < min_share:
+        return None
+
+    label = top_key.split(":", 1)[-1]
+    if top_key.startswith("hash1:"):
+        label = top_key.split(":", 1)[1]
+    elif len(top_key) >= 12:
+        label = top_key[:12]
+
+    return DominantSourceCandidate(
+        source_key=top_key,
+        source_label=label,
+        packet_count=top_count,
+        traffic_share=share,
+        kind="packet",
+    )
+
+
+def detect_dominant_path_source(
+    paths: list[tuple[str, ...]],
+    *,
+    min_share: float = DEFAULT_LIKELY_SOURCE_MIN_SHARE,
+    min_count: int = 3,
+) -> DominantSourceCandidate | None:
+    """Fallback: deepest shared RF prefix when packet sender identity is unavailable."""
+    if not paths:
+        return None
+
+    narrowed = narrow_dominant_prefix(paths, min_share=min_share)
+    if narrowed is None or narrowed.packet_count < min_count:
+        return None
+
+    hop = narrowed.hop_tokens[-1]
+    return DominantSourceCandidate(
+        source_key=f"path:{hop}",
+        source_label=hop,
+        packet_count=narrowed.packet_count,
+        traffic_share=narrowed.traffic_share,
+        kind="path",
+    )
 
 
 def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
