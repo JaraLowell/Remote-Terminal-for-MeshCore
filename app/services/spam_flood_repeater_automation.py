@@ -17,16 +17,29 @@ logger = logging.getLogger(__name__)
 
 SpamFloodPhase = Literal["start", "end"]
 
-# During floods, send more than twice — the radio lock and RF congestion can swallow attempts.
-DEFAULT_COMMAND_ATTEMPTS = 5
+# Retry only when the repeater does not answer; stop after the first confirmed response.
+DEFAULT_COMMAND_ATTEMPTS = 2
 DEFAULT_COMMAND_RETRY_DELAY_SECS = 10.0
 CLI_RESPONSE_TIMEOUT_SECS = 8.0
 CLI_LOGIN_TIMEOUT_SECS = 8.0
 
+_dispatch_in_flight: set[SpamFloodPhase] = set()
+
 
 def schedule_spam_flood_repeater_commands(phase: SpamFloodPhase) -> None:
     """Fire-and-forget repeater command dispatch for a spam flood phase transition."""
-    asyncio.create_task(_dispatch_spam_flood_repeater_commands(phase))
+    if phase in _dispatch_in_flight:
+        logger.info("Spam flood %s command dispatch skipped: already in flight", phase)
+        return
+    _dispatch_in_flight.add(phase)
+    asyncio.create_task(_run_spam_flood_repeater_dispatch(phase))
+
+
+async def _run_spam_flood_repeater_dispatch(phase: SpamFloodPhase) -> None:
+    try:
+        await _dispatch_spam_flood_repeater_commands(phase)
+    finally:
+        _dispatch_in_flight.discard(phase)
 
 
 async def _send_spam_flood_cli_command(
@@ -136,12 +149,14 @@ async def _send_command_with_retries(
                 prefix,
                 command,
             )
-            await _send_spam_flood_cli_command(
+            response = await _send_spam_flood_cli_command(
                 contact=contact,
                 command=command,
                 operation_name=operation_name,
                 repeater_password=repeater_password,
             )
+            if response is not None:
+                return
         except RadioDisconnectedError:
             logger.warning(
                 "Spam flood %s command attempt %d/%d skipped: radio disconnected",

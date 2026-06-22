@@ -1285,10 +1285,34 @@ export function MapView({
               <span className="flex items-center gap-1">
                 <span
                   className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: PARTICLE_COLOR_MAP['ACK'] }}
+                  style={{ backgroundColor: PARTICLE_COLOR_MAP['RQ'] }}
                   aria-hidden="true"
                 />
-                ACK
+                Rq
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: PARTICLE_COLOR_MAP['RS'] }}
+                  aria-hidden="true"
+                />
+                Rs
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: PARTICLE_COLOR_MAP['PA'] }}
+                  aria-hidden="true"
+                />
+                Path
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: PARTICLE_COLOR_MAP['AK'] }}
+                  aria-hidden="true"
+                />
+                Ack
               </span>
             </>
           )}

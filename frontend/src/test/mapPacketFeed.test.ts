@@ -168,7 +168,7 @@ describe('mapPacketFeed', () => {
     );
 
     expect(entry.typeLabel).toBe('ADVERT');
-    expect(entry.typeColor).toBe('#f59e0b');
+    expect(entry.typeColor).toBe('#84cc16');
     expect(entry.senderLabel).toBe('solo');
     expect(entry.messageBody).toBeNull();
     expect(entry.inlineSuffix).toBe('');
@@ -241,7 +241,9 @@ describe('mapPacketFeed', () => {
   });
 
   it('treats Path packets like ACK for label and live-traffic color', () => {
-    expect(getPacketLabel(PayloadType.Path)).toBe('ACK');
-    expect(PARTICLE_COLOR_MAP[getPacketLabel(PayloadType.Path)]).toBe(PARTICLE_COLOR_MAP.ACK);
+    expect(getPacketLabel(PayloadType.Path)).toBe('PA');
+    expect(PARTICLE_COLOR_MAP[getPacketLabel(PayloadType.Path)]).toBe(PARTICLE_COLOR_MAP.PA);
+    expect(getPacketLabel(PayloadType.Ack)).toBe('AK');
+    expect(PARTICLE_COLOR_MAP[getPacketLabel(PayloadType.Ack)]).not.toBe(PARTICLE_COLOR_MAP.PA);
   });
 });

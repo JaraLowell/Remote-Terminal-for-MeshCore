@@ -30,31 +30,23 @@ import {
 import { createDecoderOptions } from '../utils/rawPacketInspector';
 import { isTrackerDecryptedPacket } from '../utils/trackerPacket';
 import { getContactDisplayName } from '../utils/pubkey';
+import { getPayloadTypeNameColor } from '../utils/packetTypeColors';
 import { cn } from '@/lib/utils';
 
-const TIMELINE_FILL_COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6'];
-
-/**
- * Build a stable name→color mapping so the same type always gets the same
- * color regardless of sort order or appearance order.
- */
-function buildColorMap(names: readonly string[]): Map<string, string> {
+function buildPayloadTypeColorMap(names: readonly string[]): Map<string, string> {
   const map = new Map<string, string>();
-  for (let i = 0; i < names.length; i++) {
-    map.set(names[i], TIMELINE_FILL_COLORS[i % TIMELINE_FILL_COLORS.length]);
+  for (const name of names) {
+    map.set(name, getPayloadTypeNameColor(name));
   }
   return map;
 }
 
-function colorForIndex(index: number, colorMap?: Map<string, string>, name?: string): string {
-  if (colorMap && name && colorMap.has(name)) {
-    return colorMap.get(name)!;
-  }
-  return TIMELINE_FILL_COLORS[index % TIMELINE_FILL_COLORS.length];
-}
-
 const KNOWN_PAYLOAD_TYPE_SET = new Set<string>(KNOWN_PAYLOAD_TYPES);
-const PAYLOAD_TYPE_COLOR_MAP = buildColorMap(KNOWN_PAYLOAD_TYPES);
+const PAYLOAD_TYPE_COLOR_MAP = buildPayloadTypeColorMap(KNOWN_PAYLOAD_TYPES);
+
+function colorForType(type: string, colorMap?: Map<string, string>): string {
+  return colorMap?.get(type) ?? getPayloadTypeNameColor(type);
+}
 
 function getPacketTypeName(
   packet: RawPacket,
@@ -331,7 +323,7 @@ function RankedBars({
               />
               <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={16}>
                 {data.map((entry, i) => (
-                  <Cell key={i} fill={colorForIndex(i, colorMap, entry.name)} />
+                  <Cell key={i} fill={colorForType(entry.name, colorMap)} />
                 ))}
               </Bar>
             </BarChart>
@@ -415,9 +407,12 @@ function TimelineChart({
   bins: PacketTimelineBin[];
   colorMap: Map<string, string>;
 }) {
-  const typeOrder = Array.from(new Set(bins.flatMap((bin) => Object.keys(bin.countsByType)))).slice(
-    0,
-    TIMELINE_FILL_COLORS.length
+  const typeOrder = Array.from(
+    new Set(bins.flatMap((bin) => Object.keys(bin.countsByType))),
+  ).sort(
+    (a, b) =>
+      KNOWN_PAYLOAD_TYPES.indexOf(a as (typeof KNOWN_PAYLOAD_TYPES)[number]) -
+      KNOWN_PAYLOAD_TYPES.indexOf(b as (typeof KNOWN_PAYLOAD_TYPES)[number]),
   );
 
   const data = bins.map((bin) => {
@@ -437,7 +432,7 @@ function TimelineChart({
             <span key={type} className="inline-flex items-center gap-1">
               <span
                 className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: colorMap.get(type) ?? TIMELINE_FILL_COLORS[0] }}
+                style={{ backgroundColor: colorForType(type, colorMap) }}
               />
               <span>{type}</span>
             </span>
@@ -469,7 +464,7 @@ function TimelineChart({
                 key={type}
                 dataKey={type}
                 stackId="packets"
-                fill={colorMap.get(type) ?? TIMELINE_FILL_COLORS[0]}
+                fill={colorForType(type, colorMap)}
                 radius={i === typeOrder.length - 1 ? [2, 2, 0, 0] : undefined}
               />
             ))}

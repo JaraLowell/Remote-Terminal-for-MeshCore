@@ -1057,8 +1057,9 @@ class SpamLiveTracker:
         self._last_broadcast_at = 0.0
         broadcast_event("spam_flood_alert", status.model_dump())
 
-    def _reset_episode_state(self) -> None:
-        self._cancel_episode_watchdog()
+    def _reset_episode_state(self, *, skip_watchdog_cancel: bool = False) -> None:
+        if not skip_watchdog_cancel:
+            self._cancel_episode_watchdog()
         self._episode_open = False
         self._repeater_automation_armed = False
         self._episode_db_id = None
@@ -1103,6 +1104,11 @@ class SpamLiveTracker:
     async def _end_episode(self, current_time: float) -> None:
         if not self._episode_open:
             return
+
+        should_send_end = self._repeater_automation_armed
+        self._episode_open = False
+        self._repeater_automation_armed = False
+        self._cancel_episode_watchdog()
 
         episode_id = self._episode_db_id
         started_at = self._episode_started_at or int(current_time)
@@ -1157,9 +1163,9 @@ class SpamLiveTracker:
         except Exception:
             logger.exception("Failed to finalize spam flood episode %s", episode_id)
         finally:
-            if self._repeater_automation_armed:
+            if should_send_end:
                 schedule_spam_flood_repeater_commands("end")
-            self._reset_episode_state()
+            self._reset_episode_state(skip_watchdog_cancel=True)
 
     async def observe_and_maybe_alert(
         self,

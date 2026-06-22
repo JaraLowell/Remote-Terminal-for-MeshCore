@@ -11,6 +11,7 @@ import { createDecoderOptions } from './rawPacketInspector';
 import { getContactDisplayName } from './pubkey';
 import { isTrackerDecryptedPacket, trackerNodeIdFromPacket } from './trackerPacket';
 import { getPacketLabel, PARTICLE_COLOR_MAP } from './visualizerUtils';
+import { getPayloadTypeNameColor, PACKET_TYPE_COLOR_HEX } from './packetTypeColors';
 import { getRawPacketObservationKey } from './rawPacketIdentity';
 
 export const MAP_PACKET_FEED_LIMIT = 12;
@@ -19,12 +20,15 @@ const PACKET_TYPE_LABELS: Record<string, string> = {
   AD: 'ADVERT',
   GT: 'CHANNEL',
   DM: 'DIRECT',
-  ACK: 'ACK',
+  AK: 'ACK',
+  PA: 'PATH',
   TR: 'TRACE',
   RQ: 'REQUEST',
+  AR: 'ANON',
   RS: 'RESPONSE',
+  CT: 'CMD',
   TK: 'TRACKER',
-  '?':'UNKNOWN',
+  '?': 'UNKNOWN',
 };
 
 export interface MapPacketFeedEntry {
@@ -440,7 +444,8 @@ function payloadTypeLabel(packet: RawPacket, decoded: DecodedPacket | null): str
   const backendType = packet.payload_type?.trim();
   if (backendType) {
     const normalized = backendType.toUpperCase();
-    if (normalized === 'PATH') return ('ACK');
+    if (normalized === 'PATH') return 'PATH';
+    if (normalized.includes('ANON')) return 'ANON';
     return normalized;
   }
   return 'UNKNOWN';
@@ -448,20 +453,12 @@ function payloadTypeLabel(packet: RawPacket, decoded: DecodedPacket | null): str
 
 function payloadTypeColor(packet: RawPacket, decoded: DecodedPacket | null): string {
   if (isTrackerDecryptedPacket(packet)) {
-    return '#22c55e';
+    return PACKET_TYPE_COLOR_HEX.Tracker;
   }
   if (decoded?.isValid) {
     return PARTICLE_COLOR_MAP[getPacketLabel(decoded.payloadType)];
   }
-  const normalized = packet.payload_type?.toUpperCase() ?? '';
-  if (normalized.includes('ADVERT')) return PARTICLE_COLOR_MAP.AD;
-  if (normalized.includes('GROUP') || normalized === 'CHAN') return PARTICLE_COLOR_MAP.GT;
-  if (normalized.includes('TEXT') || normalized === 'PRIV') return PARTICLE_COLOR_MAP.DM;
-  if (normalized.includes('ACK') || normalized === 'PATH') return PARTICLE_COLOR_MAP.ACK;
-  if (normalized.includes('TRACE')) return PARTICLE_COLOR_MAP.TR;
-  if (normalized.includes('REQUEST')) return PARTICLE_COLOR_MAP.RQ;
-  if (normalized.includes('RESPONSE')) return PARTICLE_COLOR_MAP.RS;
-  return PARTICLE_COLOR_MAP['?'];
+  return getPayloadTypeNameColor(packet.payload_type);
 }
 
 function decodePacket(packet: RawPacket, decoderOptions?: DecryptionOptions): DecodedPacket | null {

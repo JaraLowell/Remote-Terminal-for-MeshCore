@@ -422,7 +422,8 @@ export function SettingsSpamDefenseSection({
               className="font-mono text-sm"
             />
             <p className="text-[0.8125rem] text-muted-foreground">
-              Sent when a spam flood episode begins (five attempts, 10s apart).
+              Sent when a spam flood episode begins. One send per episode; retries only if no CLI
+              response is heard (up to 2 attempts, 10s apart).
             </p>
           </div>
           <div className="space-y-2">
@@ -435,7 +436,8 @@ export function SettingsSpamDefenseSection({
               className="font-mono text-sm"
             />
             <p className="text-[0.8125rem] text-muted-foreground">
-              Sent when the episode ends after the hold window (five attempts, 10s apart).
+              Sent when the episode ends after the hold window. One send per episode; retries only
+              if no CLI response is heard (up to 2 attempts, 10s apart).
             </p>
           </div>
         </div>

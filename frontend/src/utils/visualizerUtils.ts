@@ -1,13 +1,19 @@
 import { MeshCoreDecoder, PayloadType } from '@michaelhart/meshcore-decoder';
 import { CONTACT_TYPE_REPEATER, type Contact, type RawPacket } from '../types';
 import { hashString } from './contactAvatar';
+import {
+  getVisualizerLabelColor,
+  PACKET_TYPE_COLOR_HEX,
+  PACKET_VISUALIZER_LEGEND_ITEMS,
+  type PacketVisualizerLabel,
+} from './packetTypeColors';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
 export type NodeType = 'self' | 'repeater' | 'client';
-type PacketLabel = 'AD' | 'GT' | 'DM' | 'ACK' | 'TR' | 'RQ' | 'RS' | '?';
+export type PacketLabel = PacketVisualizerLabel;
 
 export interface Particle {
   linkKey: string;
@@ -71,25 +77,31 @@ export const COLORS = {
   background: '#0a0a0a',
   link: '#4b5563',
   ambiguous: '#9ca3af',
-  particleAD: '#f59e0b', // amber - advertisements
-  particleGT: '#06b6d4', // cyan - group text
-  particleDM: '#8b5cf6', // purple - direct messages
-  particleACK: '#22c55e', // green - acknowledgments
-  particleTR: '#f97316', // orange - trace packets
-  particleRQ: '#ec4899', // pink - requests
-  particleRS: '#14b8a6', // teal - responses
-  particleUnknown: '#6b7280', // gray - unknown
+  particleAD: PACKET_TYPE_COLOR_HEX.Advert,
+  particleGT: PACKET_TYPE_COLOR_HEX.GroupText,
+  particleDM: PACKET_TYPE_COLOR_HEX.TextMessage,
+  particleACK: PACKET_TYPE_COLOR_HEX.Ack,
+  particlePA: PACKET_TYPE_COLOR_HEX.Path,
+  particleTR: PACKET_TYPE_COLOR_HEX.Trace,
+  particleRQ: PACKET_TYPE_COLOR_HEX.Request,
+  particleAR: PACKET_TYPE_COLOR_HEX.AnonRequest,
+  particleRS: PACKET_TYPE_COLOR_HEX.Response,
+  particleCT: PACKET_TYPE_COLOR_HEX.Control,
+  particleUnknown: PACKET_TYPE_COLOR_HEX.Unknown,
 } as const;
 
 export const PARTICLE_COLOR_MAP: Record<PacketLabel, string> = {
-  AD: COLORS.particleAD,
-  GT: COLORS.particleGT,
-  DM: COLORS.particleDM,
-  ACK: COLORS.particleACK,
-  TR: COLORS.particleTR,
-  RQ: COLORS.particleRQ,
-  RS: COLORS.particleRS,
-  '?': COLORS.particleUnknown,
+  AD: getVisualizerLabelColor('AD'),
+  GT: getVisualizerLabelColor('GT'),
+  DM: getVisualizerLabelColor('DM'),
+  AK: getVisualizerLabelColor('AK'),
+  PA: getVisualizerLabelColor('PA'),
+  TR: getVisualizerLabelColor('TR'),
+  RQ: getVisualizerLabelColor('RQ'),
+  AR: getVisualizerLabelColor('AR'),
+  RS: getVisualizerLabelColor('RS'),
+  CT: getVisualizerLabelColor('CT'),
+  '?': getVisualizerLabelColor('?'),
 };
 
 export const PARTICLE_SPEED = 0.008;
@@ -99,16 +111,7 @@ const MIN_OBSERVATIONS_TO_SPLIT = 20; // Need at least this many unique sources 
 const MAX_TRAFFIC_OBSERVATIONS = 200; // Per ambiguous prefix, to limit memory
 const TRAFFIC_OBSERVATION_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes - old observations are pruned
 
-export const PACKET_LEGEND_ITEMS = [
-  { label: 'AD', color: COLORS.particleAD, description: 'Advertisement' },
-  { label: 'GT', color: COLORS.particleGT, description: 'Group Text' },
-  { label: 'DM', color: COLORS.particleDM, description: 'Direct Message' },
-  { label: 'ACK', color: COLORS.particleACK, description: 'Acknowledgment' },
-  { label: 'TR', color: COLORS.particleTR, description: 'Trace' },
-  { label: 'RQ', color: COLORS.particleRQ, description: 'Request' },
-  { label: 'RS', color: COLORS.particleRS, description: 'Response' },
-  { label: '?', color: COLORS.particleUnknown, description: 'Other' },
-] as const;
+export const PACKET_LEGEND_ITEMS = PACKET_VISUALIZER_LEGEND_ITEMS;
 
 export interface PathStep {
   nodeId: string | null;
@@ -207,15 +210,19 @@ export function getPacketLabel(payloadType: number): PacketLabel {
     case PayloadType.TextMessage:
       return 'DM';
     case PayloadType.Ack:
+      return 'AK';
     case PayloadType.Path:
-      return 'ACK';
+      return 'PA';
     case PayloadType.Trace:
       return 'TR';
     case PayloadType.Request:
-    case PayloadType.AnonRequest:
       return 'RQ';
+    case PayloadType.AnonRequest:
+      return 'AR';
     case PayloadType.Response:
       return 'RS';
+    case PayloadType.Control:
+      return 'CT';
     default:
       return '?';
   }

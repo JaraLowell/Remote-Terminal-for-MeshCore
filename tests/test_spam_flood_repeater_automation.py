@@ -11,7 +11,9 @@ from app.repository import ContactRepository
 from app.repository.settings import AppSettingsRepository
 from app.services.spam_flood_repeater_automation import (
     DEFAULT_COMMAND_ATTEMPTS,
+    _dispatch_in_flight,
     _dispatch_spam_flood_repeater_commands,
+    schedule_spam_flood_repeater_commands,
 )
 
 
@@ -41,8 +43,50 @@ async def test_spam_flood_repeater_automation_sends_start_command(test_db):
         mock_send.return_value = "ok"
         await _dispatch_spam_flood_repeater_commands("start")
 
-    assert mock_send.await_count == DEFAULT_COMMAND_ATTEMPTS
+    assert mock_send.await_count == 1
     assert mock_send.await_args.kwargs["command"] == "set repeat off"
+
+
+@pytest.mark.asyncio
+async def test_spam_flood_repeater_automation_retries_when_no_cli_response(test_db):
+    repeater_key = "dd" + "44" * 31
+    await ContactRepository.upsert(
+        ContactUpsert(public_key=repeater_key, name="Retry Repeater", type=2)
+    )
+    await AppSettingsRepository.update(
+        spam_flood_automation_enabled=True,
+        spam_flood_repeater_keys=[repeater_key],
+        spam_flood_start_command="set repeat off",
+    )
+
+    with (
+        patch(
+            "app.services.spam_flood_repeater_automation._send_spam_flood_cli_command",
+            new_callable=AsyncMock,
+        ) as mock_send,
+        patch(
+            "app.services.spam_flood_repeater_automation.asyncio.sleep",
+            new_callable=AsyncMock,
+        ),
+    ):
+        mock_send.return_value = None
+        await _dispatch_spam_flood_repeater_commands("start")
+
+    assert mock_send.await_count == DEFAULT_COMMAND_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_spam_flood_repeater_automation_skips_duplicate_in_flight_dispatch():
+    _dispatch_in_flight.clear()
+    _dispatch_in_flight.add("start")
+
+    with patch(
+        "app.services.spam_flood_repeater_automation.asyncio.create_task",
+    ) as mock_create_task:
+        schedule_spam_flood_repeater_commands("start")
+        mock_create_task.assert_not_called()
+
+    _dispatch_in_flight.clear()
 
 
 @pytest.mark.asyncio
@@ -91,5 +135,5 @@ async def test_spam_flood_repeater_automation_sends_end_command(test_db):
         mock_send.return_value = "ok"
         await _dispatch_spam_flood_repeater_commands("end")
 
-    assert mock_send.await_count == DEFAULT_COMMAND_ATTEMPTS
+    assert mock_send.await_count == 1
     assert mock_send.await_args.kwargs["command"] == "set repeat on"

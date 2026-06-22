@@ -11,24 +11,9 @@ import {
 
 import { api } from '../api';
 import type { SpamPacketTimelineResponse } from '../types';
+import { getSpamCategoryColor } from '../utils/packetTypeColors';
 
 const TIMELINE_POLL_MS = 5 * 60 * 1000;
-
-const CATEGORY_COLORS: Record<string, string> = {
-  pm_transport: '#ef4444',
-  dm: '#f97316',
-  group_transport: '#ec4899',
-  group_text: '#8b5cf6',
-  response: '#10b981',
-  request: '#0ea5e9',
-  path: '#14b8a6',
-  ack: '#6366f1',
-  advert: '#22c55e',
-  anon_request: '#eab308',
-  trace: '#84cc16',
-  control: '#64748b',
-  other: '#94a3b8',
-};
 
 const TOOLTIP_STYLE = {
   contentStyle: {
@@ -164,7 +149,7 @@ export function SpamPacketTimelineSection({ refreshNonce = 0 }: SpamPacketTimeli
             <span key={category} className="inline-flex items-center gap-1.5">
               <span
                 className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: CATEGORY_COLORS[category] ?? CATEGORY_COLORS.other }}
+                style={{ backgroundColor: getSpamCategoryColor(category) }}
               />
               <span>
                 {data.category_labels[category] ?? category}
@@ -220,7 +205,7 @@ export function SpamPacketTimelineSection({ refreshNonce = 0 }: SpamPacketTimeli
                   key={category}
                   dataKey={category}
                   stackId="packets"
-                  fill={CATEGORY_COLORS[category] ?? CATEGORY_COLORS.other}
+                  fill={getSpamCategoryColor(category)}
                   radius={
                     index === categories.length - 1 ? [2, 2, 0, 0] : undefined
                   }

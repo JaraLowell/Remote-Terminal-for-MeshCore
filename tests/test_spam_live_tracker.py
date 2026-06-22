@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -381,6 +382,35 @@ async def test_spam_live_tracker_schedules_repeater_commands_on_episode_lifecycl
         tracker._sync_active_state(base + 40)
         await tracker._end_episode(base + 40)
         assert mock_schedule.call_args_list[-1].args == ("end",)
+
+
+@pytest.mark.asyncio
+async def test_spam_live_tracker_end_episode_runs_once_when_called_concurrently(test_db):
+    tracker = _make_tracker(packet_threshold=2, hold_secs=30, gateway_pubkeys=frozenset())
+    base = _test_base()
+    with (
+        patch(
+            "app.services.spam_live_tracker.schedule_spam_flood_repeater_commands",
+        ) as mock_schedule,
+        patch(
+            "app.services.spam_live_tracker.SpamBaselineService.get_packets_per_window",
+            new_callable=AsyncMock,
+            return_value=1.0,
+        ),
+        patch(
+            "app.services.spam_live_tracker.SpamFloodEpisodeRepository.finalize",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await tracker.observe_and_maybe_alert(path_hex="AABB", path_len=2, observed_at=base)
+        await tracker.observe_and_maybe_alert(path_hex="AACC", path_len=2, observed_at=base + 1)
+        tracker._sync_active_state(base + 40)
+        await asyncio.gather(
+            tracker._end_episode(base + 40),
+            tracker._end_episode(base + 40),
+        )
+        end_calls = [call for call in mock_schedule.call_args_list if call.args == ("end",)]
+        assert len(end_calls) == 1
 
 
 @pytest.mark.asyncio
