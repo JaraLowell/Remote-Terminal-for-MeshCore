@@ -45,6 +45,40 @@ export interface RawPacketInspection {
   payloadFields: PacketByteField[];
 }
 
+export function formatFeedHashToken(token: string | null | undefined): string | null {
+  if (!token?.trim()) return null;
+  const trimmed = token.trim();
+  if (/^[0-9a-f]+$/i.test(trimmed)) {
+    return trimmed.slice(0, 6).toUpperCase();
+  }
+  return trimmed;
+}
+
+export function buildRawPacketRoutedSummary(
+  label: string,
+  options: {
+    source?: string | null;
+    destination?: string | null;
+    pathStr: string;
+    destinationWord?: 'for' | 'to';
+  }
+): string {
+  const fromPart = formatFeedHashToken(options.source);
+  const destPart = formatFeedHashToken(options.destination);
+  const destWord = options.destinationWord ?? 'for';
+
+  if (fromPart && destPart) {
+    return `${label} from ${fromPart} ${destWord} ${destPart}${options.pathStr}`;
+  }
+  if (fromPart) {
+    return `${label} from ${fromPart}${options.pathStr}`;
+  }
+  if (destPart) {
+    return `${label} ${destWord} ${destPart}${options.pathStr}`;
+  }
+  return `${label}${options.pathStr}`;
+}
+
 export function formatHexByHop(hex: string, hashSize: number | null | undefined): string {
   const normalized = hex.trim().toUpperCase();
   if (!normalized || !hashSize || hashSize < 1) {
@@ -432,11 +466,12 @@ export function decodePacketSummary(
           destinationHash?: string;
           sourceHash?: string;
         } | null;
-        if (payload?.sourceHash && payload?.destinationHash) {
-          summary = `DM from ${payload.sourceHash} to ${payload.destinationHash}${pathStr}`;
-        } else {
-          summary = `DM${pathStr}`;
-        }
+        summary = buildRawPacketRoutedSummary('DM', {
+          source: payload?.sourceHash,
+          destination: payload?.destinationHash,
+          pathStr,
+          destinationWord: 'to',
+        });
         break;
       }
       case PayloadType.GroupText: {
@@ -473,7 +508,8 @@ export function decodePacketSummary(
               : '';
           summary = `Advert: ${payload.appData.name}${role ? ` (${role})` : ''}${pathStr}`;
         } else if (payload?.publicKey) {
-          summary = `Advert: ${payload.publicKey.slice(0, 8)}...${pathStr}`;
+          const pubkeyLabel = formatFeedHashToken(payload.publicKey);
+          summary = `Advert: ${pubkeyLabel ?? payload.publicKey}${pathStr}`;
         } else {
           summary = `Advert${pathStr}`;
         }
@@ -487,11 +523,11 @@ export function decodePacketSummary(
           sourceHash?: string;
           destinationHash?: string;
         } | null;
-        if (reqPayload?.sourceHash) {
-          summary = `Request from ${reqPayload.sourceHash}${pathStr}`;
-        } else {
-          summary = `Request${pathStr}`;
-        }
+        summary = buildRawPacketRoutedSummary('Request', {
+          source: reqPayload?.sourceHash,
+          destination: reqPayload?.destinationHash,
+          pathStr,
+        });
         break;
       }
       case PayloadType.Response: {
@@ -499,11 +535,11 @@ export function decodePacketSummary(
           sourceHash?: string;
           destinationHash?: string;
         } | null;
-        if (respPayload?.sourceHash) {
-          summary = `Response from ${respPayload.sourceHash}${pathStr}`;
-        } else {
-          summary = `Response${pathStr}`;
-        }
+        summary = buildRawPacketRoutedSummary('Response', {
+          source: respPayload?.sourceHash,
+          destination: respPayload?.destinationHash,
+          pathStr,
+        });
         break;
       }
       case PayloadType.AnonRequest: {
@@ -511,11 +547,11 @@ export function decodePacketSummary(
           senderPublicKey?: string;
           destinationHash?: string;
         } | null;
-        if (anonPayload?.senderPublicKey) {
-          summary = `AnonRequest from ${anonPayload.senderPublicKey.slice(0, 8)}...${pathStr}`;
-        } else {
-          summary = `AnonRequest${pathStr}`;
-        }
+        summary = buildRawPacketRoutedSummary('AnonRequest', {
+          source: anonPayload?.senderPublicKey,
+          destination: anonPayload?.destinationHash,
+          pathStr,
+        });
         break;
       }
       case PayloadType.Trace:
@@ -529,14 +565,13 @@ export function decodePacketSummary(
           subType?: number;
           publicKey?: string;
         } | null;
-        if (ctrlPayload?.publicKey) {
-          const subTypeName = Utils.getControlSubTypeName
-            ? Utils.getControlSubTypeName(ctrlPayload.subType ?? 0)
-            : 'Control';
-          summary = `${subTypeName} from ${ctrlPayload.publicKey.slice(0, 8)}...${pathStr}`;
-        } else {
-          summary = `Control${pathStr}`;
-        }
+        const subTypeName = Utils.getControlSubTypeName
+          ? Utils.getControlSubTypeName(ctrlPayload?.subType ?? 0)
+          : 'Control';
+        summary = buildRawPacketRoutedSummary(subTypeName, {
+          source: ctrlPayload?.publicKey,
+          pathStr,
+        });
         break;
       }
       default:
