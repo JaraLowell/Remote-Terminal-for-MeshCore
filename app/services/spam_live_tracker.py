@@ -9,7 +9,13 @@ from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.models import SpamBlockCandidate, SpamCategoryFloodStatus, SpamFloodCluster, SpamLiveStatus
+from app.models import (
+    SpamBlockCandidate,
+    SpamBlockIngressHint,
+    SpamCategoryFloodStatus,
+    SpamFloodCluster,
+    SpamLiveStatus,
+)
 from app.path_utils import (
     hash_mode_from_hop_token,
     hop_allows_prefix_name_lookup,
@@ -42,6 +48,7 @@ from app.services.spam_path_analysis import (
     detect_dominant_packet_source,
     detect_dominant_path_source,
     estimate_origin_geo,
+    format_block_segment_label,
     format_route,
     geo_weighted_centroid,
     hop_suspect_score,
@@ -88,6 +95,7 @@ class SpamLiveTracker:
     fluke_max_duration_secs: int = 300
     episode_progress_debounce_secs: float = 3.0
     episode_progress_max_secs: float = 10.0
+    block_candidates_refresh_secs: float = 10.0
 
     _category_states: dict[str, CategoryFloodState] = field(default_factory=dict, init=False)
     _gateway_pubkeys: frozenset[str] = field(
@@ -1009,33 +1017,87 @@ class SpamLiveTracker:
             return dict(state.episode_likely_source)
         return self._empty_likely_source_fields()
 
-    def _block_candidates(self, state: CategoryFloodState) -> tuple[list[SpamBlockCandidate], float | None]:
+    async def _block_candidates(
+        self,
+        state: CategoryFloodState,
+        current_time: float,
+    ) -> tuple[list[SpamBlockCandidate], float | None]:
         if not state.active:
+            state.block_candidates_cache = []
+            state.block_candidates_combined_cache = None
+            state.block_candidates_refreshed_at = 0.0
             return [], None
+
+        if (
+            state.block_candidates_cache
+            and current_time - state.block_candidates_refreshed_at
+            < self.block_candidates_refresh_secs
+        ):
+            return state.block_candidates_cache, state.block_candidates_combined_cache
+
         records = self._clustering_records(state)
         paths = [record.full_rf_path for record in records if record.full_rf_path]
         if len(paths) < 5:
+            state.block_candidates_cache = []
+            state.block_candidates_combined_cache = None
+            state.block_candidates_refreshed_at = current_time
             return [], None
+
         ranked, combined_coverage = rank_block_candidates(
             paths,
             min_paths=5,
             min_packets=2,
             min_share=max(0.08, self.cluster_min_ratio * 0.5),
         )
-        return (
-            [
-                SpamBlockCandidate(
-                    route=item.route,
-                    hop_tokens=list(item.hop_tokens),
-                    segment_len=item.segment_len,
-                    packet_count=item.packet_count,
-                    occurrence_count=item.occurrence_count,
-                    traffic_share=round(item.traffic_share, 4),
-                )
+        lookup_tokens = list(
+            dict.fromkeys(
+                hop
                 for item in ranked
-            ],
-            round(combined_coverage, 4) if combined_coverage is not None else None,
+                for hop in (
+                    *item.hop_tokens,
+                    *(hint.hop for hint in item.ingress_hints),
+                )
+            )
         )
+        hop_geos = await self._lookup_prefix_geos(lookup_tokens)
+        hop_names = {
+            hop: geo["name"]
+            for hop, geo in hop_geos.items()
+            if geo.get("name")
+        }
+
+        candidates = [
+            SpamBlockCandidate(
+                route=item.route,
+                route_label=format_block_segment_label(
+                    item.hop_tokens,
+                    source_name=hop_names.get(item.source_hop),
+                ),
+                hop_tokens=list(item.hop_tokens),
+                segment_len=item.segment_len,
+                source_hop=item.source_hop,
+                source_name=hop_names.get(item.source_hop),
+                db_hop=item.db_hop,
+                db_name=hop_names.get(item.db_hop),
+                ingress_hints=[
+                    SpamBlockIngressHint(
+                        hop=hint.hop,
+                        name=hop_names.get(hint.hop),
+                        packet_count=hint.packet_count,
+                    )
+                    for hint in item.ingress_hints
+                ],
+                packet_count=item.packet_count,
+                occurrence_count=item.occurrence_count,
+                traffic_share=round(item.traffic_share, 4),
+            )
+            for item in ranked
+        ]
+        combined = round(combined_coverage, 4) if combined_coverage is not None else None
+        state.block_candidates_cache = candidates
+        state.block_candidates_combined_cache = combined
+        state.block_candidates_refreshed_at = current_time
+        return candidates, combined
 
     async def _build_category_status_async(
         self,
@@ -1075,7 +1137,10 @@ class SpamLiveTracker:
         else:
             likely_source = self._empty_likely_source_fields()
 
-        block_candidates, block_candidates_combined_coverage = self._block_candidates(state)
+        block_candidates, block_candidates_combined_coverage = await self._block_candidates(
+            state,
+            current_time,
+        )
 
         return SpamCategoryFloodStatus(
             category=state.category,

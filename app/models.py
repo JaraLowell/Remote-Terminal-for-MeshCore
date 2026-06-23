@@ -571,12 +571,37 @@ class SpamRouteStatsResponse(BaseModel):
     routes: list[SpamRouteStat]
 
 
+class SpamBlockIngressHint(BaseModel):
+    """Ingress hop for paths that traverse a block candidate segment."""
+
+    hop: str
+    name: str | None = None
+    packet_count: int
+
+
 class SpamBlockCandidate(BaseModel):
     """Consecutive hop segment that may block a large share of flood traffic."""
 
-    route: str = Field(description="Display label, for example '77 -> AB'")
-    hop_tokens: list[str] = Field(description="Hop identifiers in traversal order")
+    route: str = Field(description="Segment hops with DB-to-source arrow, for example '64 ⇢ B5'")
+    route_label: str = Field(
+        description="Segment label with source-side hop annotated, for example '64 ⇢ B5 (Orinen ⇢ DB)'",
+    )
+    hop_tokens: list[str] = Field(description="Hop identifiers in traversal order (DB-side first)")
     segment_len: int = Field(description="Number of consecutive hops in this segment (2 or 3)")
+    source_hop: str = Field(description="Source-side hop at the end of the segment")
+    source_name: str | None = Field(
+        default=None,
+        description="Resolved contact name for the source-side hop when known",
+    )
+    db_hop: str = Field(description="DB-side hop at the start of the segment")
+    db_name: str | None = Field(
+        default=None,
+        description="Resolved contact name for the DB-side hop when known",
+    )
+    ingress_hints: list[SpamBlockIngressHint] = Field(
+        default_factory=list,
+        description="Distinct ingress hops for paths carrying this segment",
+    )
     packet_count: int = Field(
         description="Episode paths that contain this consecutive segment",
     )

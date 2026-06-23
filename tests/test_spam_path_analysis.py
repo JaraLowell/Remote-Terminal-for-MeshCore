@@ -10,6 +10,8 @@ from app.services.spam_path_analysis import (
     build_one_byte_geo_hint,
     consolidate_geo_hotspots,
     estimate_origin_geo,
+    format_block_segment_label,
+    format_block_segment_route,
     hop_suspect_score,
     narrow_dominant_prefix,
     rank_block_candidates,
@@ -192,10 +194,30 @@ def test_rank_block_candidates_prefers_frequent_two_hop_segments():
     ranked, combined = rank_block_candidates(paths, min_paths=5, min_packets=2, min_share=0.5)
     assert ranked
     assert ranked[0].hop_tokens == ("77", "AB")
+    assert ranked[0].route == "77 ⇢ AB"
+    assert ranked[0].route_label == "77 ⇢ AB (AB ⇢ DB)"
+    assert ranked[0].source_hop == "AB"
+    assert ranked[0].db_hop == "77"
     assert ranked[0].packet_count == 5
     assert ranked[0].traffic_share == pytest.approx(5 / 6)
     assert combined is not None
     assert combined >= 5 / 6
+
+
+def test_rank_block_candidates_tracks_multiple_ingress_hops():
+    paths = [
+        ("F6", "64", "B5"),
+        ("F6", "64", "B5", "A0"),
+        ("AB", "64", "B5"),
+        ("AB", "64", "B5", "CC"),
+        ("AB", "64", "B5", "DD"),
+        ("ZZ", "YY"),
+    ]
+    ranked, _combined = rank_block_candidates(paths, min_paths=5, min_packets=2, min_share=0.4)
+    top = next(item for item in ranked if item.hop_tokens == ("64", "B5"))
+    ingress = {hint.hop: hint.packet_count for hint in top.ingress_hints}
+    assert ingress == {"F6": 2, "AB": 3}
+    assert format_block_segment_label(top.hop_tokens) == "64 ⇢ B5 (B5 ⇢ DB)"
 
 
 def test_rank_block_candidates_empty_until_enough_paths():

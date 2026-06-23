@@ -841,6 +841,13 @@ function LiveCategoryFloodCard({ flood }: { flood: SpamCategoryFloodStatus }) {
   );
 }
 
+function formatIngressHintLabel(hint: { hop: string; name?: string | null }): string {
+  if (hint.name) {
+    return `${hint.name} (${hint.hop})`;
+  }
+  return hint.hop;
+}
+
 function BlockPathCandidatesSection({ flood }: { flood: SpamCategoryFloodStatus }) {
   const candidates = flood.block_candidates ?? [];
   const combined = flood.block_candidates_combined_coverage;
@@ -856,36 +863,50 @@ function BlockPathCandidatesSection({ flood }: { flood: SpamCategoryFloodStatus 
         )}
       </div>
       <p className="text-[0.8125rem] text-muted-foreground">
-        Frequent 2–3 hop stretches seen in this episode. Blocking these on repeaters may cut most of
-        the flood as paths accumulate.
+        Frequent 2–3 hop stretches (DB-side ⇢ source-side). Blocking these on repeaters may cut
+        most of the flood. Refreshes about every 10 seconds during an attack.
       </p>
       {candidates.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           Not enough path data yet — this list updates as more packets arrive.
         </p>
       ) : (
-        <div className="space-y-1.5">
-          {candidates.map((candidate, index) => (
-            <div
-              key={`${candidate.route}-${candidate.segment_len}-${index}`}
-              className="flex flex-wrap items-center justify-between gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1.5"
-            >
-              <div className="min-w-0">
-                <div className="font-mono text-sm">{candidate.route}</div>
-                <div className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">
-                  {candidate.segment_len}-hop segment
+        <div className="grid gap-2 sm:grid-cols-2">
+          {candidates.map((candidate, index) => {
+            const ingressHints = candidate.ingress_hints ?? [];
+            const showIngress = ingressHints.length > 1;
+            return (
+              <div
+                key={`${candidate.route}-${candidate.segment_len}-${index}`}
+                className="flex min-w-0 flex-col justify-between gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1.5"
+              >
+                <div className="min-w-0">
+                  <div className="font-mono text-sm leading-snug">
+                    {candidate.route_label || candidate.route}
+                  </div>
+                  <div className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">
+                    {candidate.segment_len}-hop segment
+                  </div>
+                  {showIngress && (
+                    <div className="mt-1 text-[0.6875rem] text-muted-foreground">
+                      Via{' '}
+                      {ingressHints
+                        .map((hint) => formatIngressHintLabel(hint))
+                        .join(' · ')}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded bg-destructive/10 px-2 py-0.5 font-semibold text-destructive">
+                    {formatPercent(candidate.traffic_share)} of paths
+                  </span>
+                  <span className="text-muted-foreground">
+                    {candidate.packet_count} pkts · {candidate.occurrence_count}× seen
+                  </span>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded bg-destructive/10 px-2 py-0.5 font-semibold text-destructive">
-                  {formatPercent(candidate.traffic_share)} of paths
-                </span>
-                <span className="text-muted-foreground">
-                  {candidate.packet_count} pkts · {candidate.occurrence_count}× seen
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

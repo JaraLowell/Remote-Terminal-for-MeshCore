@@ -440,10 +440,22 @@ export interface SpamFloodCluster {
   flood_source_label?: string | null;
 }
 
+export interface SpamBlockIngressHint {
+  hop: string;
+  name?: string | null;
+  packet_count: number;
+}
+
 export interface SpamBlockCandidate {
   route: string;
+  route_label: string;
   hop_tokens: string[];
   segment_len: number;
+  source_hop: string;
+  source_name?: string | null;
+  db_hop: string;
+  db_name?: string | null;
+  ingress_hints?: SpamBlockIngressHint[];
   packet_count: number;
   occurrence_count: number;
   traffic_share: number;

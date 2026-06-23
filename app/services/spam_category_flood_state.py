@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.models import SpamFloodCluster
+from app.models import SpamBlockCandidate, SpamFloodCluster
 from app.services.spam_path_analysis import SourceFilterPlan
 
 
@@ -31,6 +31,9 @@ class CategoryFloodState:
     episode_likely_source: dict[str, Any] | None = None
     episode_source_filter: SourceFilterPlan | None = None
     episode_open: bool = False
+    block_candidates_cache: list[SpamBlockCandidate] = field(default_factory=list)
+    block_candidates_combined_cache: float | None = None
+    block_candidates_refreshed_at: float = 0.0
 
     def reset_episode(self) -> None:
         self.episode_open = False
@@ -44,3 +47,6 @@ class CategoryFloodState:
         self.episode_peak_clusters = {}
         self.episode_likely_source = None
         self.episode_source_filter = None
+        self.block_candidates_cache = []
+        self.block_candidates_combined_cache = None
+        self.block_candidates_refreshed_at = 0.0

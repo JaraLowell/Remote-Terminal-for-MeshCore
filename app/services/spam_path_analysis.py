@@ -297,6 +297,29 @@ def format_route(hop_tokens: list[str] | tuple[str, ...]) -> str:
     return " -> ".join(hop_tokens)
 
 
+def format_block_segment_route(hop_tokens: list[str] | tuple[str, ...]) -> str:
+    if not hop_tokens:
+        return "Direct"
+    return " ⇢ ".join(hop_tokens)
+
+
+def format_block_segment_label(
+    hop_tokens: list[str] | tuple[str, ...],
+    *,
+    source_name: str | None = None,
+) -> str:
+    """Render a block segment with source-side hop labeled toward DB."""
+    if not hop_tokens:
+        return "Direct"
+    if len(hop_tokens) == 1:
+        source_hop = hop_tokens[0]
+        source_label = source_name or source_hop
+        return f"{source_hop} ({source_label} ⇢ DB)"
+    source_hop = hop_tokens[-1]
+    source_label = source_name or source_hop
+    return f"{format_block_segment_route(hop_tokens)} ({source_label} ⇢ DB)"
+
+
 def path_contains_segment(path: tuple[str, ...], segment: tuple[str, ...]) -> bool:
     """True when *segment* appears as consecutive hops inside *path*."""
     if not segment or len(segment) > len(path):
@@ -316,15 +339,27 @@ def count_segment_occurrences(path: tuple[str, ...], segment: tuple[str, ...]) -
 
 
 @dataclass(frozen=True)
+class BlockIngressHint:
+    """Ingress hop where paths carrying a segment entered the mesh."""
+
+    hop: str
+    packet_count: int
+
+
+@dataclass(frozen=True)
 class BlockCandidateSegment:
     """A consecutive hop segment that appears often enough to consider blocking."""
 
     hop_tokens: tuple[str, ...]
     segment_len: int
     route: str
+    route_label: str
+    source_hop: str
+    db_hop: str
     packet_count: int
     occurrence_count: int
     traffic_share: float
+    ingress_hints: tuple[BlockIngressHint, ...] = ()
 
 
 def greedy_combined_coverage(
@@ -379,27 +414,43 @@ def rank_block_candidates(
         return [], None
 
     occurrence_counter: Counter[tuple[str, ...]] = Counter()
+    ingress_by_segment: dict[tuple[str, ...], Counter[str]] = {}
     for path in filtered:
+        entry_hop = path[0]
+        seen_segments: set[tuple[str, ...]] = set()
         for segment_len in segment_lengths:
             if segment_len < 2 or segment_len > len(path):
                 continue
             for index in range(len(path) - segment_len + 1):
-                occurrence_counter[tuple(path[index : index + segment_len])] += 1
+                segment = tuple(path[index : index + segment_len])
+                occurrence_counter[segment] += 1
+                if segment not in seen_segments:
+                    ingress_by_segment.setdefault(segment, Counter())[entry_hop] += 1
+                    seen_segments.add(segment)
 
     candidates: list[BlockCandidateSegment] = []
     for segment, occurrence_count in occurrence_counter.items():
-        packet_count = sum(1 for path in filtered if path_contains_segment(path, segment))
+        ingress_counter = ingress_by_segment.get(segment, Counter())
+        packet_count = sum(ingress_counter.values())
         share = packet_count / total_paths
         if packet_count < min_packets or share < min_share:
             continue
+        ingress_hints = tuple(
+            BlockIngressHint(hop=hop, packet_count=count)
+            for hop, count in ingress_counter.most_common()
+        )
         candidates.append(
             BlockCandidateSegment(
                 hop_tokens=segment,
                 segment_len=len(segment),
-                route=format_route(segment),
+                route=format_block_segment_route(segment),
+                route_label=format_block_segment_label(segment),
+                source_hop=segment[-1],
+                db_hop=segment[0],
                 packet_count=packet_count,
                 occurrence_count=occurrence_count,
                 traffic_share=share,
+                ingress_hints=ingress_hints,
             )
         )
 
