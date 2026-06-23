@@ -33,6 +33,7 @@ export const SPAM_CATEGORY_COLOR_HEX: Record<string, string> = {
   anon_request: PACKET_TYPE_COLOR_HEX.AnonRequest,
   ack: PACKET_TYPE_COLOR_HEX.Ack,
   dm: PACKET_TYPE_COLOR_HEX.TextMessage,
+  gt: PACKET_TYPE_COLOR_HEX.GroupText,
   pm_transport: '#fb923c',
   group_transport: '#f472b6',
   group_text: PACKET_TYPE_COLOR_HEX.GroupText,

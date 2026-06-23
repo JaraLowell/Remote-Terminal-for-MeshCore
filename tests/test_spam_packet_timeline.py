@@ -69,12 +69,44 @@ async def test_spam_packet_timeline_buckets_last_24h(test_db):
         now=now,
     )
     assert result["total_packets"] == 3
-    assert result["totals_by_category"]["pm_transport"] == 1
-    assert result["totals_by_category"]["group_text"] == 1
-    assert result["totals_by_category"]["dm"] == 1
-    assert "pm_transport" in result["category_labels"]
-    assert result["category_labels"]["pm_transport"] == CATEGORY_LABELS["pm_transport"]
+    assert result["totals_by_category"]["dm"] == 2
+    assert result["totals_by_category"]["gt"] == 1
+    assert "pm_transport" not in result["totals_by_category"]
+    assert "group_text" not in result["totals_by_category"]
+    assert result["category_labels"]["dm"] == "DM"
     assert len(result["buckets"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_spam_packet_timeline_merges_transport_and_flood_dm_gt(test_db):
+    now = 1_700_100_100
+    async with test_db.tx() as conn:
+        await conn.execute(
+            "INSERT INTO raw_packets (timestamp, data) VALUES (?, ?)",
+            (now - 900, bytes([_header(0x00, 0x02)] + [0] * 8)),
+        )
+        await conn.execute(
+            "INSERT INTO raw_packets (timestamp, data) VALUES (?, ?)",
+            (now - 800, bytes([_header(0x02, 0x02)] + [0] * 8)),
+        )
+        await conn.execute(
+            "INSERT INTO raw_packets (timestamp, data) VALUES (?, ?)",
+            (now - 700, bytes([_header(0x03, 0x05)] + [0] * 8)),
+        )
+        await conn.execute(
+            "INSERT INTO raw_packets (timestamp, data) VALUES (?, ?)",
+            (now - 600, bytes([_header(0x01, 0x05)] + [0] * 8)),
+        )
+
+    result = await SpamPacketTimelineService.get_timeline(
+        window_hours=24,
+        bucket_minutes=30,
+        now=now,
+    )
+    assert result["total_packets"] == 4
+    assert result["totals_by_category"]["dm"] == 2
+    assert result["totals_by_category"]["gt"] == 2
+    assert len(result["categories"]) == 2
 
 
 @pytest.mark.asyncio
@@ -110,4 +142,4 @@ async def test_spam_packet_timeline_sql_aggregation_handles_many_rows(test_db):
         now=now,
     )
     assert result["total_packets"] == 250
-    assert result["totals_by_category"]["group_text"] == 250
+    assert result["totals_by_category"]["gt"] == 250

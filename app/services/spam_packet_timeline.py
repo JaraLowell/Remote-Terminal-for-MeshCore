@@ -88,6 +88,57 @@ def classify_packet_info(packet_info: PacketInfo) -> str:
     )
 
 
+# 24-hour timeline chart merges transport/flood splits to match Raw Packet Feed types.
+TIMELINE_DISPLAY_ORDER: tuple[str, ...] = (
+    "dm",
+    "gt",
+    "response",
+    "request",
+    "path",
+    "ack",
+    "advert",
+    "anon_request",
+    "trace",
+    "control",
+    "other",
+)
+
+_TIMELINE_DISPLAY_CATEGORY: dict[str, str] = {
+    "pm_transport": "dm",
+    "dm": "dm",
+    "group_transport": "gt",
+    "group_text": "gt",
+    "request": "request",
+    "response": "response",
+    "path": "path",
+    "ack": "ack",
+    "advert": "advert",
+    "anon_request": "anon_request",
+    "trace": "trace",
+    "control": "control",
+    "other": "other",
+}
+
+TIMELINE_CATEGORY_LABELS: dict[str, str] = {
+    "dm": "DM",
+    "gt": "GT",
+    "request": "Request",
+    "response": "Response",
+    "path": "Path",
+    "ack": "ACK",
+    "advert": "Advert",
+    "anon_request": "AnonRequest",
+    "trace": "Trace",
+    "control": "Control",
+    "other": "Unknown",
+}
+
+
+def timeline_display_category(internal_category: str) -> str:
+    """Collapse internal flood categories into Raw Packet Feed-style chart keys."""
+    return _TIMELINE_DISPLAY_CATEGORY.get(internal_category, "other")
+
+
 def primary_category_from_counts(counts: dict[str, int]) -> str | None:
     """Pick the dominant category; ties break using chart display order."""
     if not counts:
@@ -138,21 +189,27 @@ class SpamPacketTimelineService:
                 rows = await cursor.fetchall()
 
         bucket_counts: dict[int, dict[str, int]] = {}
-        totals_by_category: dict[str, int] = {key: 0 for key in CATEGORY_ORDER}
+        totals_by_category: dict[str, int] = {key: 0 for key in TIMELINE_DISPLAY_ORDER}
 
         for row in rows:
             bucket_ts = int(row["bucket_ts"])
-            category = _category_from_header_hex(row["header_hex"])
+            internal_category = _category_from_header_hex(row["header_hex"])
+            display_category = timeline_display_category(internal_category)
             packet_count = int(row["packet_count"])
-            counts = bucket_counts.setdefault(bucket_ts, {key: 0 for key in CATEGORY_ORDER})
-            counts[category] = counts.get(category, 0) + packet_count
-            totals_by_category[category] = totals_by_category.get(category, 0) + packet_count
+            counts = bucket_counts.setdefault(
+                bucket_ts,
+                {key: 0 for key in TIMELINE_DISPLAY_ORDER},
+            )
+            counts[display_category] = counts.get(display_category, 0) + packet_count
+            totals_by_category[display_category] = (
+                totals_by_category.get(display_category, 0) + packet_count
+            )
 
         end_bucket = (now_ts // bucket_secs) * bucket_secs
         buckets: list[dict[str, Any]] = []
         current = bucket_start
         while current <= end_bucket:
-            counts = bucket_counts.get(current, {key: 0 for key in CATEGORY_ORDER})
+            counts = bucket_counts.get(current, {key: 0 for key in TIMELINE_DISPLAY_ORDER})
             buckets.append(
                 {
                     "timestamp": current,
@@ -164,7 +221,7 @@ class SpamPacketTimelineService:
 
         active_categories = [
             category
-            for category in CATEGORY_ORDER
+            for category in TIMELINE_DISPLAY_ORDER
             if totals_by_category.get(category, 0) > 0
         ]
 
@@ -173,7 +230,9 @@ class SpamPacketTimelineService:
             "bucket_minutes": bucket_minutes,
             "generated_at": now_ts,
             "categories": active_categories,
-            "category_labels": {key: CATEGORY_LABELS[key] for key in active_categories},
+            "category_labels": {
+                key: TIMELINE_CATEGORY_LABELS[key] for key in active_categories
+            },
             "buckets": buckets,
             "totals_by_category": {
                 key: totals_by_category.get(key, 0)
