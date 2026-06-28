@@ -31,8 +31,11 @@ DEFAULT_REGIONS = [
     "de-nord", "de-west", "de-mitte", "de-ost", "de-sued", "de-ni", "de-nw",
     # Common regional/local codes United Kingdom
     "eng", "eng-ne", "eng-nw", "eng-se", "eng-sw",
+    # Common regional/local codes Belgium
+    "beanr",
     # NL IATA Regions (for testing/demo purposes)
-    "nl-grq", "nl-lwr", "nl-dhr", "nl-ley", "nl-ens", "nl-ams", "nl-utc", "nl-rtm", "nl-ude", "nl-glz", "nl-ein", "nl-woe", "nl-mst",
+    "nl-grq", "nl-lwr", "nl-dhr", "nl-ley", "nl-ens", "nl-ams", "nl-utc", "nl-rtm", "nl-ude", "nl-glz", "nl-ein", 
+    "nl-woe", "nl-mst", "nl-aer", "nl-dev", "nl-lid", "nl-hag",
 ]
 
 # Region classification for smart sorting
@@ -46,10 +49,15 @@ REGION_CATEGORIES = {
     # Netherlands IATA codes
     "nl-iata": {
         "nl-grq", "nl-lwr", "nl-dhr", "nl-ley", "nl-ens", "nl-ams", "nl-utc", "nl-rtm", "nl-ude", "nl-glz", "nl-ein", "nl-woe", "nl-mst",
+        "nl-woe", "nl-mst", "nl-aer", "nl-dev", "nl-lid", "nl-hag",
     },
     # Germany regional codes
     "de-regional": {
         "de-nord", "de-west", "de-mitte", "de-ost", "de-sued", "de-ni", "de-nw",
+    },
+    # Belgium regional codes
+    "be-regional": {
+        "beanr",
     },
     # UK regional codes
     "uk-regional": {
